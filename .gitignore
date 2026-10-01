@@ -1,0 +1,31 @@
+# 영상·이미지 (용량 큼 → 공유 드라이브 / Git LFS)
+*.mp4
+*.mov
+*.avi
+*.MP4
+*.MOV
+sync/calib/
+replay/videos/
+
+# 대용량 데이터·모델
+*.npy
+*.npz
+*.tfrecord*
+runs/**/checkpoint*/
+runs/**/*.safetensors
+runs/**/*.pt
+runs/**/*.bin
+rlds/data/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
