@@ -16,6 +16,7 @@ runs/**/*.safetensors
 runs/**/*.pt
 runs/**/*.bin
 rlds/data/
+*.sif
 
 # Python
 __pycache__/
