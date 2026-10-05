@@ -29,13 +29,13 @@ python ...
 # 6) 끝나면 반납
 exit
 ```
-- 결과 파일은 노트북에서 `scp -P 10000 coss37@155.230.81.91:~/project/<경로> ./<경로>`로 가져옵니다
+- 산출물을 git에 올리는 방법은 6절 참고 (서버에서 결과 브랜치로 바로 커밋, 또는 `scp`로 노트북에 가져와 커밋)
 
 ### 작업 파이프라인
 ```
 [각자 노트북]     브랜치 생성 → 코드 작성 → commit → push → PR → main에 merge
 [서버 ~/project]  main 고정 → git pull → 실행만
-[결과물]          서버에서 scp로 노트북에 가져와 → 브랜치에서 commit → PR
+[산출물]          서버 별도 폴더(worktree)에서 결과 브랜치 → --author 커밋 → push → PR  (6절)
 ```
 - 브랜치 이름: `역할폴더/작업내용` (예: `robot/iiwa7-model`, `retarget/dls`, `metrics/definitions`)
 - `main`에 직접 push하지 않고 PR로 합칩니다
@@ -43,6 +43,7 @@ exit
 
 ### 주의사항
 - **서버 `~/project`에서 `git checkout`·파일 수정·`git commit` 금지** — 4명이 같은 계정·같은 폴더를 써서, 바꾸면 다른 사람의 실행·pull이 깨집니다
+- 서버에서 산출물 커밋은 `~/work/본인이름` worktree에서만, `--author` 꼭 붙이기 (6절)
 - `git pull`이 에러로 멈추면 임의로 지우거나 되돌리지 말고 팀 채팅에 알려주세요 (`pull.ff only` 설정으로, 누가 서버에서 파일을 고쳐 둔 경우 멈추게 해둠)
 - 그냥 `conda activate robot` 금지 → 반드시 `source ~/use_robot.sh` (이유는 5절)
 - `robot` 환경에 `pip install` 금지 → 필요한 패키지는 정구현에게 요청
@@ -202,14 +203,25 @@ echo "robot 환경 활성화됨: $(which python)"
 ```
 각자 노트북: 브랜치 → commit → push → PR → main   (본인 이름으로 기록)
 서버 ~/project: main 고정, git pull → 실행만        (checkout·수정·커밋 금지)
+서버 산출물:    worktree로 결과 브랜치 → --author 커밋 → push → PR
 ```
-- 서버 `~/project`에서 파일을 고쳐두면 다음 사람의 `git pull`이 충돌로 막힘
-- 서버에서 생긴 결과 파일은 `scp`로 노트북에 가져와 커밋
+- 서버 `~/project`에서 파일을 고쳐두거나 커밋하면 다음 사람의 `git pull`이 막힘
+- 서버에서 생긴 산출물은 **서버에서 바로 커밋 가능**. 단, `~/project`가 아니라 별도 폴더(worktree)에서:
   ```bash
-  # 노트북에서
+  cd ~/project && git fetch
+  git worktree add ~/work/본인이름 -b results/작업내용 origin/main   # 결과 브랜치용 별도 폴더
+  cp ~/project/metrics/summary.md ~/work/본인이름/metrics/            # 산출물 복사
+  cd ~/work/본인이름 && git add metrics/summary.md
+  git commit --author="이름 <본인_GitHub_이메일>" -m "메시지"
+  git push origin HEAD                                               # → GitHub 웹에서 PR
+  cd ~ && git -C ~/project worktree remove ~/work/본인이름              # 정리
+  ```
+  - `--author` 필수: 공유 계정이라 빠뜨리면 `coss37-server`로 기록되고 누구 잔디에도 안 찍힘
+  - 영상·`npz`·체크포인트 같은 대용량은 커밋하지 않음 (`.gitignore`로 제외됨)
+- 노트북에서 커밋하고 싶으면 `scp`로 가져와도 됨
+  ```bash
   scp -P 10000 coss37@155.230.81.91:~/project/metrics/summary.md ./metrics/
   ```
-- 예외 없음: 1번 역할(robot/)처럼 서버에서 결과물을 만드는 경우도 `scp`로 가져와 노트북에서 커밋
 
 ### 서버 ↔ GitHub 연결 (완료, 2026-10-05 `ssh -T github-cdp1` 인증 확인)
 - 레포 전용 Deploy key: `~/.ssh/cdp1_deploy` (GitHub 레포 Settings → Deploy keys에 `coss37-server`, Read/write)
