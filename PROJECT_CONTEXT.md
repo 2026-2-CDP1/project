@@ -209,11 +209,7 @@ echo "robot 환경 활성화됨: $(which python)"
   # 노트북에서
   scp -P 10000 coss37@155.230.81.91:~/project/metrics/summary.md ./metrics/
   ```
-- 예외: 1번 역할(robot/)처럼 서버에서 직접 결과물을 만드는 경우 서버에서 커밋하되 작성자 지정
-  ```bash
-  git commit --author="이름 <본인_GitHub_이메일>" -m "메시지"
-  ```
-  (서버는 공유 계정이라 `--author` 없이 커밋하면 `coss37-server`로 기록되고 누구 잔디에도 안 찍힘)
+- 예외 없음: 1번 역할(robot/)처럼 서버에서 결과물을 만드는 경우도 `scp`로 가져와 노트북에서 커밋
 
 ### 서버 ↔ GitHub 연결 (완료, 2026-10-05 `ssh -T github-cdp1` 인증 확인)
 - 레포 전용 Deploy key: `~/.ssh/cdp1_deploy` (GitHub 레포 Settings → Deploy keys에 `coss37-server`, Read/write)
