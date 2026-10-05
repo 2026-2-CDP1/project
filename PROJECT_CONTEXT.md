@@ -35,7 +35,7 @@ exit
 ```
 [각자 노트북]     브랜치 생성 → 코드 작성 → commit → push → PR → main에 merge
 [서버 ~/project]  main 고정 → git pull → 실행만
-[산출물]          서버 별도 폴더(worktree)에서 결과 브랜치 → `git c-이니셜` 커밋 → push → PR  (6절)
+[산출물]          서버 별도 폴더(worktree)에서 결과 브랜치 → `git c 본인이름` 커밋 → push → PR  (6절)
 ```
 - 브랜치 이름: `역할폴더/작업내용` (예: `robot/iiwa7-model`, `retarget/dls`, `metrics/definitions`)
 - `main`에 직접 push하지 않고 PR로 합칩니다
@@ -43,7 +43,7 @@ exit
 
 ### 주의사항
 - **서버 `~/project`에서 `git checkout`·파일 수정·`git commit` 금지** — 4명이 같은 계정·같은 폴더를 써서, 바꾸면 다른 사람의 실행·pull이 깨집니다
-- 서버에서 산출물 커밋은 `~/work/본인이름` worktree에서만, `git c-이니셜`로 커밋 (6절)
+- 서버에서 커밋은 `~/project`가 아니라 `~/work/본인이름`에서만, `git commit` 대신 `git c 본인이름` (예: `git c 신서연 -m "메시지"`) — 전체 순서는 6절 「서버에서 커밋하는 법」
 - `git pull`이 에러로 멈추면 임의로 지우거나 되돌리지 말고 팀 채팅에 알려주세요 (`pull.ff only` 설정으로, 누가 서버에서 파일을 고쳐 둔 경우 멈추게 해둠)
 - 그냥 `conda activate robot` 금지 → 반드시 `source ~/use_robot.sh` (이유는 5절)
 - `robot` 환경에 `pip install` 금지 → 필요한 패키지는 정구현에게 요청
@@ -203,31 +203,39 @@ echo "robot 환경 활성화됨: $(which python)"
 ```
 각자 노트북: 브랜치 → commit → push → PR → main   (본인 이름으로 기록)
 서버 ~/project: main 고정, git pull → 실행만        (checkout·수정·커밋 금지)
-서버 산출물:    worktree로 결과 브랜치 → git c-이니셜 커밋 → push → PR
+서버 산출물:    worktree로 결과 브랜치 → git c 본인이름 커밋 → push → PR
 ```
 - 서버 `~/project`에서 파일을 고쳐두거나 커밋하면 다음 사람의 `git pull`이 막힘
-- 서버에서 생긴 산출물은 **서버에서 바로 커밋 가능**. 단, `~/project`가 아니라 별도 폴더(worktree)에서:
-  ```bash
-  cd ~/project && git fetch
-  git worktree add ~/work/본인이름 -b results/작업내용 origin/main   # 결과 브랜치용 별도 폴더
-  cp ~/project/metrics/summary.md ~/work/본인이름/metrics/            # 산출물 복사
-  cd ~/work/본인이름 && git add metrics/summary.md
-  git c-jgh -m "메시지"                                               # 본인 이니셜 alias (아래 표)
-  git push origin HEAD                                               # → GitHub 웹에서 PR
-  cd ~ && git -C ~/project worktree remove ~/work/본인이름              # 정리
-  ```
-  - 그냥 `git commit` 금지: 공유 계정이라 `coss37-server`로 기록되고 누구 잔디에도 안 찍힘
-  - 서버 `~/.gitconfig`에 팀원별 작성자 alias 등록됨 (`git c-이니셜` = `git commit --author="본인"`)
+- 서버에서 생긴 산출물은 **서버에서 바로 커밋 가능**. 단, `~/project`가 아니라 본인 작업 폴더(worktree)에서
 
-    | alias | 작성자 |
-    |---|---|
-    | `git c-jgh` | 정구현 |
-    | `git c-csh` | 차서현 |
-    | `git c-ssy` | 신서연 |
-    | `git c-jhj` | 제효정 |
+### 서버에서 커밋하는 법
+예시: 신서연이 서버에서 만든 `metrics/summary.md`를 올리는 경우
+```bash
+# 1) 최신 main 기준으로 본인 작업 폴더 + 결과 브랜치 만들기
+cd ~/project && git fetch
+git worktree add ~/work/신서연 -b results/metrics-summary origin/main
 
-    확인: `git config --global --get-regexp '^alias\.c-'`
-  - 영상·`npz`·체크포인트 같은 대용량은 커밋하지 않음 (`.gitignore`로 제외됨)
+# 2) 올릴 산출물을 본인 폴더로 복사
+cp ~/project/metrics/summary.md ~/work/신서연/metrics/
+
+# 3) 본인 폴더에서 커밋 — 그냥 git commit 말고 git c 본인이름
+cd ~/work/신서연
+git add metrics/summary.md
+git c 신서연 -m "지표 결과 요약 추가"
+
+# 4) GitHub에 올리기 → GitHub 웹에서 PR 만들어 main에 merge
+git push origin HEAD
+
+# 5) 본인 폴더 정리
+cd ~ && git -C ~/project worktree remove ~/work/신서연
+```
+- 사람마다 바꿀 곳: 폴더 `~/work/본인이름`, 브랜치 `results/작업내용`, 커밋 `git c 본인이름`
+- **`git c 본인이름`** = 본인 이름·이메일로 커밋하는 명령 (서버 `~/.gitconfig`에 등록됨)
+  - 사용 가능한 이름: `정구현` / `차서현` / `신서연` / `제효정`
+  - 그냥 `git commit`을 쓰면 공유 계정이라 `coss37-server`로 기록되고 누구 잔디에도 안 찍힘
+  - 이름을 틀리면 커밋하지 않고 사용법만 출력됨
+  - 등록된 이메일이 본인 GitHub 계정(Settings → Emails)에 있어야 잔디에 찍힘
+- 영상·`npz`·체크포인트 같은 대용량은 커밋하지 않음 (`.gitignore`로 제외됨)
 - 노트북에서 커밋하고 싶으면 `scp`로 가져와도 됨
   ```bash
   scp -P 10000 coss37@155.230.81.91:~/project/metrics/summary.md ./metrics/
