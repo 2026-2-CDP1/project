@@ -22,9 +22,10 @@ tmux new -s 본인이름_작업        # 재접속: tmux attach -t 본인이름_
 # 4) GPU 노드 할당 (GPU 필요 없으면 --gres 생략)
 srun --gres=gpu:1 -p p02 --job-name "작업_본인이름" --pty bash
 
-# 5) 최신 코드 받고 실행
+# 5) 최신 코드 받고 실행 — 산출물은 ~/project 밖(~/out/본인이름)에 저장
 cd ~/project && git pull
-python ...
+mkdir -p ~/out/본인이름
+python ... --out ~/out/본인이름
 
 # 6) 끝나면 반납
 exit
@@ -44,7 +45,9 @@ exit
 ### 주의사항
 - **서버 `~/project`에서 `git checkout`·파일 수정·`git commit` 금지** — 4명이 같은 계정·같은 폴더를 써서, 바꾸면 다른 사람의 실행·pull이 깨집니다
 - 서버에서 커밋은 `~/project`가 아니라 `~/work/본인이름`에서만, `git commit` 대신 `git c 본인이름` (예: `git c 신서연 -m "메시지"`) — 전체 순서는 6절 「서버에서 커밋하는 법」
-- `git pull`이 에러로 멈추면 임의로 지우거나 되돌리지 말고 팀 채팅에 알려주세요 (`pull.ff only` 설정으로, 누가 서버에서 파일을 고쳐 둔 경우 멈추게 해둠)
+- **산출물은 `~/project` 안에 저장하지 않기** → `~/out/본인이름/`에 저장 (코드는 출력 경로를 인자로 받게 작성, 예: `--out`)
+  - `~/project` 안에 생긴 파일이 나중에 main에 같은 경로로 합쳐지면 다음 사람의 `git pull`이 막히고, 두 사람이 같은 경로에 덮어쓰게 됨
+- `git pull`이 에러로 멈추면 임의로 지우거나 되돌리지 말고 팀 채팅에 알려주세요 (누가 서버 `~/project`에서 커밋했거나 파일을 고쳐 둔 경우 멈출 수 있음. 커밋으로 갈라진 경우는 `pull.ff only` 설정으로 merge 대신 에러가 나게 해둠)
 - 그냥 `conda activate robot` 금지 → 반드시 `source ~/use_robot.sh` (이유는 5절)
 - `robot` 환경에 `pip install` 금지 → 필요한 패키지는 정구현에게 요청
 - GPU는 `--job-name "작업_본인이름"`으로 잡고, 끝나면 바로 `exit`
@@ -206,17 +209,18 @@ echo "robot 환경 활성화됨: $(which python)"
 서버 산출물:    worktree로 결과 브랜치 → git c 본인이름 커밋 → push → PR
 ```
 - 서버 `~/project`에서 파일을 고쳐두거나 커밋하면 다음 사람의 `git pull`이 막힘
+- 실행 산출물은 `~/project` 밖 `~/out/본인이름/`에 저장 (`~/project` 안에 생기면 그 파일이 main에 합쳐진 뒤 pull 충돌)
 - 서버에서 생긴 산출물은 **서버에서 바로 커밋 가능**. 단, `~/project`가 아니라 본인 작업 폴더(worktree)에서
 
 ### 서버에서 커밋하는 법
-예시: 신서연이 서버에서 만든 `metrics/summary.md`를 올리는 경우
+예시: 신서연이 서버에서 실행해 `~/out/신서연/summary.md`로 저장한 결과를 `metrics/summary.md`로 올리는 경우
 ```bash
 # 1) 최신 main 기준으로 본인 작업 폴더 + 결과 브랜치 만들기
 cd ~/project && git fetch
 git worktree add ~/work/신서연 -b results/metrics-summary origin/main
 
 # 2) 올릴 산출물을 본인 폴더로 복사
-cp ~/project/metrics/summary.md ~/work/신서연/metrics/
+cp ~/out/신서연/summary.md ~/work/신서연/metrics/
 
 # 3) 본인 폴더에서 커밋 — 그냥 git commit 말고 git c 본인이름
 cd ~/work/신서연
@@ -226,10 +230,12 @@ git c 신서연 -m "지표 결과 요약 추가"
 # 4) GitHub에 올리기 → GitHub 웹에서 PR 만들어 main에 merge
 git push origin HEAD
 
-# 5) 본인 폴더 정리
+# 5) 본인 폴더 + 서버에 남은 결과 브랜치 정리 (GitHub에는 push한 브랜치가 그대로 남음)
 cd ~ && git -C ~/project worktree remove ~/work/신서연
+git -C ~/project branch -D results/metrics-summary
 ```
-- 사람마다 바꿀 곳: 폴더 `~/work/본인이름`, 브랜치 `results/작업내용`, 커밋 `git c 본인이름`
+- 사람마다 바꿀 곳: 산출물 `~/out/본인이름`, 작업 폴더 `~/work/본인이름`, 브랜치 `results/작업내용`(1·5단계 둘 다), 커밋 `git c 본인이름`
+- 5단계 브랜치 삭제를 빼먹으면 다음에 같은 브랜치 이름으로 1단계를 할 때 `already exists` 에러
 - **`git c 본인이름`** = 본인 이름·이메일로 커밋하는 명령 (서버 `~/.gitconfig`에 등록됨)
   - 사용 가능한 이름: `정구현` / `차서현` / `신서연` / `제효정`
   - 그냥 `git commit`을 쓰면 공유 계정이라 `coss37-server`로 기록되고 누구 잔디에도 안 찍힘
@@ -238,7 +244,7 @@ cd ~ && git -C ~/project worktree remove ~/work/신서연
 - 영상·`npz`·체크포인트 같은 대용량은 커밋하지 않음 (`.gitignore`로 제외됨)
 - 노트북에서 커밋하고 싶으면 `scp`로 가져와도 됨
   ```bash
-  scp -P 10000 coss37@155.230.81.91:~/project/metrics/summary.md ./metrics/
+  scp -P 10000 coss37@155.230.81.91:~/out/신서연/summary.md ./metrics/
   ```
 
 ### 서버 ↔ GitHub 연결 (완료, 2026-10-05 `ssh -T github-cdp1` 인증 확인)
@@ -257,7 +263,7 @@ cd ~ && git -C ~/project worktree remove ~/work/신서연
 - ⚠️ 서버 공통 설정 `/etc/ssh/ssh_config`에 `Host * / Port 10000`, `GSSAPIAuthentication yes`가 있음
   → `Port 22`를 명시하지 않으면 GitHub 접속이 10000번으로 가서 **응답 없이 멈춤**
 - 서버에서 레포 주소는 `github-cdp1:2026-2-CDP1/project.git` (별칭 사용)
-- 서버 `~/project`에 `git config pull.ff only` 설정 (실수로 생긴 merge 방지)
+- 서버 `~/project`에 `git config pull.ff only` 설정 (누가 `~/project`에서 커밋해 GitHub과 갈라졌을 때 몰래 merge하지 않고 에러로 멈춤)
 
 ### .gitignore (대용량은 깃에 올리지 않음)
 - 제외: 영상(`*.mp4`, `*.mov` 등), 키포인트·궤적(`*.npy`, `*.npz`), `*.tfrecord*`, 컨테이너(`*.sif`), `runs/` 안의 체크포인트·가중치(`*.pt`, `*.bin`, `*.safetensors`), `rlds/data/`, `sync/calib/`, `replay/videos/`
@@ -302,6 +308,7 @@ project/
 - [x] 서버 ↔ GitHub Deploy key 연결, `~/project` 클론
 - [x] 로컬 ↔ GitHub 연결 확인 (정구현)
 - [x] 작업 흐름 확정: 노트북 브랜치 → PR → main / 서버는 main pull·실행 전용
+- [x] 서버 `~/project` 설정: `pull.ff only`, 팀원별 커밋 명령 `git c 본인이름` 등록, main 동기화 확인
 
 ### 다음 (1번 역할: 로봇·시뮬레이터 셋업)
 1. KUKA LBR iiwa7 R800의 URDF·MJCF 확보
@@ -318,5 +325,6 @@ project/
 - 멘토 쪽 소통 담당자 지정 후 미팅 일정
 - IK-Geo 파이썬 패키지 종류(ik-geo / EAIK) 멘토 확인
 - 대용량 데이터 공용 저장 위치
+- 팀원별 `git c` 등록 이메일이 각자 GitHub 계정(Settings → Emails)에 등록돼 있는지 확인
 - (선택) 서버 관리자에게 GPU 노드 드라이버 535+ 업그레이드 가능 여부 문의 → 가능하면 Isaac Sim 재검토
 - (선택) 팀원별 SSH 공개키를 서버 `~/.ssh/authorized_keys`에 등록 → 비밀번호 없이 접속·VS Code Remote-SSH 편의
