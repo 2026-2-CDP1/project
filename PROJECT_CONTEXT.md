@@ -198,7 +198,7 @@ echo "robot 환경 활성화됨: $(which python)"
 | daqp | 0.10.3 |
 | scipy | 1.15.3 |
 
-- mink·qpsolvers·daqp·scipy는 알고리즘 B(mink)용, 2026-10-16 추가. 알고리즘 C(SEW 각)는 numpy만 쓴다 (`retarget/C_ikgeo/`)
+- mink·qpsolvers·daqp·scipy는 4번 역할 가이드 준비 단계 패키지(알고리즘 B), 2026-10-16 추가
 
 - 확인: `python -c "import mujoco, pinocchio; print(mujoco.__version__, pinocchio.__version__)"`
 - **이 환경에 팀원이 임의로 pip install 하지 않기** (공유 환경, 동시 설치 시 꼬임) → 필요 패키지는 정구현에게 요청
@@ -329,7 +329,7 @@ project/
 
 ### 보류·확인 필요
 - 멘토 쪽 소통 담당자 지정 후 미팅 일정
-- 알고리즘 C 구현 방식 멘토 확인: `ik-geo` 파이썬 패키지는 6자유도 전용이라 쓰지 않고, stereo-sew의 iiwa SEW IK를 numpy로 옮긴 프로토타입(`retarget/C_ikgeo/`)으로 진행 중 (4번 검토 필요)
+- IK-Geo 파이썬 패키지 종류(ik-geo / EAIK) 멘토 확인
 - 대용량 데이터 공용 저장 위치
 - 팀원별 `git c` 등록 이메일이 각자 GitHub 계정(Settings → Emails)에 등록돼 있는지 확인
 - (선택) 서버 관리자에게 GPU 노드 드라이버 535+ 업그레이드 가능 여부 문의 → 가능하면 Isaac Sim 재검토
