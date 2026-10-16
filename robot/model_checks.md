@@ -1,12 +1,13 @@
 # iiwa14 모델 사전 검사 (그리퍼·TCP 추가 전)
 
 검사일 2026-10-16. 노트북 임시 환경에서 실행: Python 3.10, mujoco 3.16.0, pin 4.1.0, ik-geo 1.0.3, mink 1.3.0, qpsolvers 4.13.0, daqp 0.10.3.
-모든 검사는 팔 끝 `link7` 기준이다. 그리퍼와 TCP를 붙인 뒤 TCP 기준으로 다시 검사한다.
+그리퍼와 TCP를 붙이기 전이라 팔 끝(플랜지·`link7`) 기준이다. TCP를 붙인 뒤 TCP 기준으로 다시 검사한다.
 
-## 1. URDF ↔ MJCF 일치 (`check_fk.py`): 통과
+## 1. URDF ↔ MJCF 일치 (`check_robot.py`): 통과
 
-- 관절 한계: 7개 모두 두 파일 일치 (±2.96706 / ±2.0944 / ±3.05433 rad)
-- FK: 무작위 자세 200개, 최대 위치 차이 1.1e-15 m, 최대 방향 차이 2.3e-15 rad (기준 1e-6 이하)
+- 관절 한계: 7개 모두 차이 0 (`joint_limits.csv`). 원본 MJCF는 소수 5자리로 반올림돼 있어 URDF 값으로 맞췄다 (`SOURCES.md`)
+- FK: 플랜지(`attachment_site` ↔ `iiwa_link_ee_kuka`), 무작위 자세 200개, 최대 위치 차이 1.2e-15 m, 최대 방향 차이 2.4e-15 rad (기준 1e-6 이하)
+- 렌더링: 영 자세와 관절별 +0.8 rad 자세 PNG 8장. 모든 링크가 표시되고, 각 관절이 예상한 축으로 돈다
 
 ## 2. 알고리즘 C, IK-Geo 적용 가능성 (`check_ikgeo.py`): 적용 가능
 
@@ -30,7 +31,7 @@
 ```bash
 cd ~/project && git pull
 source ~/use_robot.sh
-python robot/check_fk.py
+python robot/check_robot.py --out ~/out/본인이름/robot_check   # 렌더링은 GPU 노드에서 MUJOCO_GL=egl, --render 추가
 python robot/check_ikgeo.py   # ik-geo 설치 필요
 python robot/check_mink.py    # mink, qpsolvers[daqp] 설치 필요
 ```

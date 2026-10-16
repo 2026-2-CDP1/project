@@ -9,16 +9,16 @@
       <joint axis="0 0 1"/>
       <general gaintype="fixed" biastype="affine" gainprm="2000" biasprm="0 -2000 -200"/>
       <default class="joint1">
-        <joint range="-2.96706 2.96706"/>
-        <general ctrlrange="-2.96706 2.96706"/>
+        <joint range="-2.96705972839 2.96705972839"/>
+        <general ctrlrange="-2.96705972839 2.96705972839"/>
         <default class="joint2">
-          <joint range="-2.0944 2.0944"/>
-          <general ctrlrange="-2.0944 2.0944"/>
+          <joint range="-2.09439510239 2.09439510239"/>
+          <general ctrlrange="-2.09439510239 2.09439510239"/>
         </default>
       </default>
       <default class="joint3">
-        <joint range="-3.05433 3.05433"/>
-        <general ctrlrange="-3.05433 3.05433"/>
+        <joint range="-3.05432619099 3.05432619099"/>
+        <general ctrlrange="-3.05432619099 3.05432619099"/>
       </default>
       <default class="visual">
         <geom type="mesh" contype="0" conaffinity="0" group="2" material="gray"/>

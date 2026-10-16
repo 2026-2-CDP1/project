@@ -4,7 +4,7 @@
 
 | 파일 | 출처 | 변경 사항 |
 |---|---|---|
-| `robot.xml` (MJCF) | [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) `kuka_iiwa_14/iiwa14.xml` @ `62ab00f` | 없음 (원본 그대로) |
+| `robot.xml` (MJCF) | [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) `kuka_iiwa_14/iiwa14.xml` @ `62ab00f` | 관절 한계·`ctrlrange` 자릿수만 URDF와 같게 늘림 (예: `2.96706` → `2.96705972839`, 제조사 사양 ±170°/±120°/±175°의 rad 값) |
 | `assets/*.obj` | 위와 같은 폴더의 `assets/` | 없음 |
 | `robot.urdf` | [RobotLocomotion/models](https://github.com/RobotLocomotion/models) `iiwa_description/urdf/iiwa14_spheres_dense_collision.urdf` @ `f85076b` | visual 메시 경로를 `package://.../visual/*.gltf` → `assets/*.obj`로 변경 (같은 메시의 OBJ 변환본) |
 
@@ -21,7 +21,14 @@
 
 ## 1차 확인 (그리퍼·TCP 추가 전)
 
-- 관절 한계: 7개 모두 두 파일 일치 (±2.96706 / ±2.0944 / ±3.05433 rad, 제조사 사양 ±170° / ±120° / ±175°)
+- 관절 한계: 원본 MJCF는 소수 5자리로 반올림돼 있어 URDF와 최대 4.9e-6 rad 차이 → MJCF를 URDF 값(제조사 사양 ±170° / ±120° / ±175°)으로 맞춤. 이후 차이 0 (`joint_limits.csv`)
 - FK: 관절 한계 내 무작위 자세 200개(seed 0), link7 기준 최대 위치 차이 1.1e-15 m, 최대 방향 차이 2.3e-15 rad → 일치
 - 영 자세에서 link7 원점 높이 1.261 m
 - 확인 환경: mujoco 3.16.0, pinocchio 4.1.0
+
+## 서버 점검 (2026-10-16)
+
+`python robot/check_robot.py --out ~/out/본인이름/robot_check [--render]` (렌더링은 GPU 노드에서 `MUJOCO_GL=egl`)
+
+- 로드 OK (mujoco 3.14.0, pinocchio 4.1.0), 관절 한계 차이 0, FK 최대 위치 차이 1.0e-15 m · 방향 차이 2.2e-15 rad → PASS
+- 영 자세·관절별 +0.8 rad 자세 PNG 8장으로 링크 표시와 관절 회전 방향 확인
