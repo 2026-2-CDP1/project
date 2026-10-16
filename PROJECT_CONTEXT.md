@@ -38,7 +38,7 @@ exit
 [서버 ~/project]  main 고정 → git pull → 실행만
 [산출물]          서버 별도 폴더(worktree)에서 결과 브랜치 → `git c 본인이름` 커밋 → push → PR  (6절)
 ```
-- 브랜치 이름: `역할폴더/작업내용` (예: `robot/iiwa7-model`, `retarget/dls`, `metrics/definitions`)
+- 브랜치 이름: `역할폴더/작업내용` (예: `robot/iiwa14-model`, `retarget/dls`, `metrics/definitions`)
 - `main`에 직접 push하지 않고 PR로 합칩니다
 - 서버에서 돌려보고 싶은 코드는 먼저 PR로 main에 합친 뒤 pull 합니다
 
@@ -95,7 +95,7 @@ exit
 
 | 항목 | 결정 |
 |---|---|
-| 타깃 로봇 | **KUKA LBR iiwa7 (R800)**, 7자유도 single-arm + 그리퍼 |
+| 타깃 로봇 | **KUKA LBR iiwa14**, 7자유도 single-arm + 그리퍼 (평행 그리퍼 모델은 직접 추가) |
 | 시뮬레이터 | **MuJoCo** (Isaac Sim 불가 판정, 4절 참고) |
 | 촬영 장비 | iPhone (멘토 추천 앱: NeRFCapture / Spectacular Rec / AR Recorder — 연속 녹화가 기본인 Spectacular Rec 우선 테스트) |
 | 학습 모델 | OpenVLA-7B + LoRA, 대표 알고리즘 1개 데이터로 1회 |
@@ -311,9 +311,9 @@ project/
 - [x] 서버 `~/project` 설정: `pull.ff only`, 팀원별 커밋 명령 `git c 본인이름` 등록, main 동기화 확인
 
 ### 다음 (1번 역할: 로봇·시뮬레이터 셋업)
-1. KUKA LBR iiwa7 R800의 URDF·MJCF 확보
-   - ⚠️ mink 예제·MuJoCo Menagerie에 흔한 건 **iiwa14**. iiwa7과 링크 길이가 다르니 정확한 모델인지 확인
-   - IK-Geo 분류표에 iiwa 7 R800(q3 고정)이 닫힌 해 계열로 등록됨 → 알고리즘 C 적용 가능성 확인 (4번 담당과 함께)
+1. KUKA LBR iiwa14의 URDF·MJCF 확보
+   - MJCF는 mink 예제·MuJoCo Menagerie의 iiwa14 모델 사용, URDF는 MJCF에서 변환. iiwa7과 링크 길이가 다르니 섞이지 않게 주의
+   - 알고리즘 C는 SEW 각 방식(stereo-sew)으로 적용 → 4번 담당과 함께 확인
 2. 모델 확인 — 서버엔 모니터가 없으므로 `mujoco.viewer` 대신 **GPU 노드에서 오프스크린 렌더링(`MUJOCO_GL=egl`)으로 PNG 저장** 후 VS Code Remote-SSH 또는 scp로 확인
 3. TCP 정의 (그리퍼 두 손가락 끝 중간점, MJCF는 site / URDF는 고정 관절 링크)
 4. `joint_limits.csv` — 두 파일 관절 한계 비교·일치
