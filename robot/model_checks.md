@@ -1,6 +1,6 @@
 # iiwa14 모델 사전 검사 (그리퍼·TCP 추가 전)
 
-검사일 2026-10-16. 노트북 임시 환경에서 실행: Python 3.10, mujoco 3.16.0, pin 4.1.0, ik-geo 1.0.3, mink 1.3.0, qpsolvers 4.13.0, daqp 0.10.3.
+검사일 2026-10-16. 노트북 임시 환경에서 실행: Python 3.10, mujoco 3.16.0, pin 4.1.0, mink 1.3.0, qpsolvers 4.13.0, daqp 0.10.3.
 그리퍼와 TCP를 붙이기 전이라 팔 끝(플랜지·`link7`) 기준이다. TCP를 붙인 뒤 TCP 기준으로 다시 검사한다.
 
 ## 1. URDF ↔ MJCF 일치 (`check_robot.py`): 통과
@@ -9,24 +9,13 @@
 - FK: 플랜지(`attachment_site` ↔ `iiwa_link_ee_kuka`), 무작위 자세 200개, 최대 위치 차이 1.2e-15 m, 최대 방향 차이 2.4e-15 rad (기준 1e-6 이하)
 - 렌더링: 영 자세와 관절별 +0.8 rad 자세 PNG 8장. 모든 링크가 표시되고, 각 관절이 예상한 축으로 돈다
 
-## 2. 알고리즘 C, IK-Geo 적용 가능성: 적용 가능
+## 2. 알고리즘 C, SEW 각 닫힌 해 (`retarget/C_ikgeo/check_sew_ik.py`): 적용 가능
 
-### 2-1. SEW 각 방식 (`retarget/C_ikgeo/check_sew_ik.py`): 알고리즘 C의 기본 방식으로 가정
-
-- stereo-sew(MATLAB)의 iiwa 14 R820 경우를 파이썬(numpy)으로 옮긴 프로토타입이다. 7자유도 전체를 쓰고, 팔꿈치를 SEW 각 ψ로 지정한다
-- 결과 (무작위 자세 1000개): 풀이 실패 0, 자세당 해 8개(관절 한계 안 평균 7.3개), 해를 FK에 다시 넣었을 때 최대 오차 9.3e-12, SEW 각 오차 2.8e-13 rad
-- 남은 일(기준 벡터 특이점, 일직선 자세, 해 고르기)은 `retarget/C_ikgeo/README.md`에 있다. 4번 담당이 검토한다
-
-### 2-2. 관절 3 고정 방식 (`check_ikgeo.py`): 참고용
-
-- 7자유도의 팔꿈치 여유를 버리는 방식이라 C의 기본 방식으로 쓰지 않는다. `ik-geo` 파이썬 패키지로 iiwa14 기하가 풀리는지 확인한 기록으로 남긴다
-- 방식: 관절 3 고정 → 6자유도 `spherical_two_intersecting` (관절 1·2 어깨 교점, 관절 5·6·7 손목 교점)
+- stereo-sew(MATLAB)의 iiwa 14 R820 경우를 파이썬(numpy)으로 옮긴 프로토타입이다. 7자유도 전체를 쓰고, 팔꿈치를 SEW 각 ψ로 지정한다. 알고리즘 C의 기본 방식으로 가정한다
 - 링크 치수 (영 자세, z축): 베이스→어깨 0.36 m, 어깨→팔꿈치 0.42 m, 팔꿈치→손목 0.40 m, 손목→플랜지 0.081 m
-- 결과 (무작위 자세 1000개): 풀이 실패 0, 자세당 정확해 8개, 해를 FK에 다시 넣었을 때 최대 오차 5.0e-12, 원래 관절각이 항상 해에 포함됨
-- 4번 담당 참고:
-  - `ik-geo` 파이썬 패키지는 **회전행렬을 전치 형태로 주고받는다.** 그대로 넘기면 틀린 해가 나온다.
-  - 6자유도 전용이라 관절 3을 고정해야 한다. SEW 각 방식(stereo-sew)은 시험하지 않았다.
-  - 해 8개에는 관절 한계를 넘는 해가 섞일 수 있다. 해를 고르는 기준은 4번 담당이 정한다.
+- 결과 (무작위 자세 1000개): 풀이 실패 0, 자세당 해 8개(관절 한계 안 평균 7.3개), 해를 FK에 다시 넣었을 때 최대 오차 9.3e-12, SEW 각 오차 2.8e-13 rad, 원래 관절각이 항상 해에 포함됨
+- 남은 일(기준 벡터 특이점, 일직선 자세, 해 고르기)은 `retarget/C_ikgeo/README.md`에 있다. 4번 담당이 검토한다
+- 관절 3 고정 방식(`ik-geo` 파이썬 패키지, 6자유도 전용)도 한 번 확인했지만 팔꿈치 여유를 버리는 방식이라 쓰지 않기로 하고 검사 스크립트와 패키지를 정리했다
 
 ## 3. 알고리즘 B, mink 구동 (`check_mink.py`): 동작함
 
@@ -41,6 +30,6 @@
 cd ~/project && git pull
 source ~/use_robot.sh
 python robot/check_robot.py --out ~/out/본인이름/robot_check   # 렌더링은 GPU 노드에서 MUJOCO_GL=egl, --render 추가
-python robot/check_ikgeo.py   # ik-geo 설치 필요
+python retarget/C_ikgeo/check_sew_ik.py
 python robot/check_mink.py    # mink, qpsolvers[daqp] 설치 필요
 ```
