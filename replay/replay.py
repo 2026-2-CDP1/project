@@ -12,6 +12,7 @@ mj_step은 쓰지 않는다 (중력·제어기가 각도를 바꿔 버림). 함�
     python replay/replay.py --check --out ~/out/본인이름/replay_check
 """
 import argparse
+import re
 import warnings
 from collections import Counter
 from pathlib import Path
@@ -23,6 +24,23 @@ REPO = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL = REPO / "robot" / "robot.xml"
 ARM_JOINTS = [f"joint{i}" for i in range(1, 8)]
 TCP_SITES = ("tcp", "attachment_site")  # 앞에 있는 것부터 찾는다. tcp는 그리퍼가 붙은 뒤 1번이 추가
+# 자기 충돌 검사에서 빼는 몸체 쌍. 근거는 replay/collision_exclude.md. robot.xml의 <exclude>는 이 목록으로 바꿔 읽는다
+COLLISION_EXCLUDE = {("base", "link1"), ("link5", "link7")}
+
+
+def load_model(model_path, exclude=COLLISION_EXCLUDE):
+    """robot.xml을 읽되 충돌 제외 쌍을 exclude로 바꿔 컴파일한다 (원본 파일은 건드리지 않음)."""
+    path = Path(model_path).resolve()
+    xml = path.read_text(encoding="utf-8")
+    xml = re.sub(r'<exclude body1="[^"]+" body2="[^"]+"\s*/>', "", xml)
+    rule = "".join(f'<exclude body1="{a}" body2="{b}"/>' for a, b in sorted(exclude))
+    if "<contact>" in xml:
+        xml = xml.replace("<contact>", "<contact>" + rule, 1)
+    else:
+        xml = xml.replace("</mujoco>", f"<contact>{rule}</contact></mujoco>", 1)
+    # 메시 경로를 절대 경로로 (문자열로 컴파일하므로)
+    xml = re.sub(r'meshdir="([^"]+)"', lambda mo: f'meshdir="{(path.parent / mo.group(1)).as_posix()}"', xml)
+    return mujoco.MjModel.from_xml_string(xml)
 
 
 class Replayer:
@@ -30,7 +48,8 @@ class Replayer:
 
     def __init__(self, model_path=DEFAULT_MODEL):
         self.model_path = Path(model_path)
-        self.m = mujoco.MjModel.from_xml_path(str(self.model_path))
+        self.m = load_model(self.model_path)
+        self.collision_exclude = sorted(COLLISION_EXCLUDE)
         self.d = mujoco.MjData(self.m)
         self.arm_adr = np.array([self.m.jnt_qposadr[self.m.joint(n).id] for n in ARM_JOINTS])
 
@@ -100,6 +119,7 @@ class Replayer:
                 "model": str(self.model_path),
                 "tcp_site": self.tcp_site,
                 "robot_bodies": sorted(self.robot_bodies),
+                "collision_exclude": [list(p) for p in self.collision_exclude],
             },
         }
 
@@ -134,6 +154,7 @@ def check(out_dir, n, seed):
         f"model: {r.model_path}",
         f"tcp_site: {r.tcp_site}",
         f"robot_bodies: {sorted(r.robot_bodies)}",
+        f"collision_exclude: {r.collision_exclude}",
         f"shapes: tcp_pos {out['tcp_pos'].shape}, tcp_quat {out['tcp_quat'].shape}, contacts {len(out['contacts'])}",
         f"quat norm max |1-|q||: {np.abs(1 - np.linalg.norm(out['tcp_quat'], axis=1)).max():.2e}",
         f"home 자세 TCP 위치 (m): {np.round(out['tcp_pos'][0], 4).tolist()}",

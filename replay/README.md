@@ -30,7 +30,7 @@ out = replay(q_traj, gripper=None)
 | `tcp_pos` | `(T, 3)` | m | TCP 위치, **로봇 베이스 좌표** |
 | `tcp_quat` | `(T, 4)` | — | TCP 방향, 쿼터니언 **(w, x, y, z)** |
 | `contacts` | 길이 `T`의 리스트 | — | 프레임마다 `[(몸체1, 몸체2, 거리_m), ...]`. **거리가 음수면 두 몸체가 서로 파고든 것** |
-| `meta` | dict | — | `model`(모델 경로), `tcp_site`(TCP로 쓴 site 이름), `robot_bodies`(로봇 몸체 이름 목록) |
+| `meta` | dict | — | `model`(모델 경로), `tcp_site`(TCP로 쓴 site 이름), `robot_bodies`(로봇 몸체 이름 목록), `collision_exclude`(검사에서 뺀 몸체 쌍) |
 
 - `tcp_pos`, `tcp_quat`, `contacts`는 역할 가이드 5-1 1단계의 형태 그대로다. `meta`는 추가 정보라 안 써도 된다.
 - 자기 충돌과 환경 충돌 구분: 두 몸체가 모두 `meta["robot_bodies"]`에 있으면 자기 접촉, 아니면 환경(테이블·장애물) 접촉. 도우미 함수 `is_self_contact(contact, robot_bodies)`
@@ -46,7 +46,7 @@ out = replay(q_traj, gripper=None)
 
 - **기구학 재생:** 프레임마다 `qpos`에 관절 각도를 그대로 넣고 `mujoco.mj_forward`로 위치·접촉만 계산. `mj_step`은 쓰지 않는다 (중력·제어기가 각도를 바꿈)
 - 팔 이외 관절(그리퍼 등)은 keyframe `home` 값으로 둔다
-- 접촉은 MuJoCo가 `robot.xml`의 `<contact><exclude>` 쌍을 뺀 상태로 계산한 것 그대로
+- 접촉은 MuJoCo가 계산한 것 그대로. 단 `robot.xml`의 `<exclude>` 목록 대신 **`COLLISION_EXCLUDE`(2쌍, `collision_exclude.md`)**로 바꿔 읽는다. 원본 `robot.xml`은 건드리지 않는다
 
 ---
 
@@ -58,7 +58,7 @@ out = replay(q_traj, gripper=None)
 | TCP | `tcp` site가 없어서 **`attachment_site`(플랜지)** 사용, 경고 출력 → **비교용 값으로 쓰지 말 것** | 1번이 `tcp` site를 추가하면 자동으로 그것을 씀 |
 | 그리퍼 | 없음 → `gripper` 무시, 경고 출력 | 1번 `robot/gripper.csv`가 생기면 0~1을 관절값으로 옮겨 넣음 |
 | 충돌 형상 | 링크마다 구(sphere) 여러 개 (메시 아님) | — |
-| 충돌 제외 쌍 | 원본 7쌍 (base–link1/2/3, link1–link3, link3–link5, link4–link7, link5–link7) | 검토 후 `replay/collision_exclude.md`로 확정 (결과 보기 전) |
+| 충돌 제외 쌍 | **2쌍** (base–link1, link5–link7). 원본 7쌍 중 나머지 5쌍은 닿지 않아 검사에 넣음 — `collision_exclude.md` (초안, 멘토 확인 전) | 그리퍼가 붙으면 다시 검사 |
 | 환경(테이블·장애물) | 없음 → 접촉은 모두 자기 접촉 | 장애물 시나리오가 확정되면 장면 파일 추가 |
 | 좌표 | 로봇 `base`가 월드 원점 → MuJoCo 월드 좌표 = 로봇 베이스 좌표 | — |
 
@@ -85,3 +85,4 @@ python replay/replay.py --check --out ~/out/본인이름/replay_check
 | 날짜 | 버전 | 변경 |
 |---|---|---|
 | 2026-10-16 | v1 | 함수 형태 고정, 기구학 재생 구현 (플랜지 TCP, 그리퍼 없음) |
+| 2026-10-16 | v1.1 | 충돌 제외 쌍을 원본 7쌍 → 2쌍 (`collision_exclude.md`), `meta`에 `collision_exclude` 추가. 함수 형태는 그대로 |
