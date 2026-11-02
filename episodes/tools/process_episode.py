@@ -1,15 +1,15 @@
 """원본 촬영물 -> episodes/<ID>/ 형식 (역할 가이드 4~6, 8, 9단계). exo 3대 삼각측량 버전.
 
-입력: --raw 아래에 프로토콜 이름 규칙대로 바꾼 녹화 폴더 (폴더 안 파일은 앱이 만든 그대로)
-  <raw>/T1_E001_exo_front/  data.mov, data.jsonl, ...   <- 기준 카메라 (라벨·프레임 번호의 'exo')
-  <raw>/T1_E001_exo_left/
-  <raw>/T1_E001_exo_right/
-  <raw>/T1_E001_ego/
+입력: --raw 아래에 카메라별 폴더, 그 안에 에피소드 ID 폴더 (폴더 안 파일은 앱이 만든 그대로)
+  <raw>/exo_front/T1_E001/  data.mov, data.jsonl, ...   <- 기준 카메라 (라벨·프레임 번호의 'exo')
+  <raw>/exo_left/T1_E001/
+  <raw>/exo_right/T1_E001/
+  <raw>/ego/T1_E001/
 보정값: exo_calib.json 의 cameras.{front,left,right} (테이블 좌표계 공통), ref_camera
 시간 차: sync.csv 의 (episode_id, camera) 행. camera = left, right, ego (기준 카메라 대비)
 
 예:
-  python process_episode.py --raw ~/raw --id T1_E001 --task "컵 잡기" --collector 홍길동 \\
+  python process_episode.py --raw /abr/coss37/raw/20261019 --id T1_E001 --task "컵 잡기" --collector 홍길동 \\
       --hand right --tags "큰 이동|정밀 구간" --split train --start 95 --end 410 \\
       --calib ../../sync/exo_calib.json --sync ../../sync/sync.csv --out ~/out/본인이름/episodes
 --start/--end: 기준 카메라 프레임 번호. 시작 = 초기 자세 첫 프레임, 끝 = 종료 자세 도달 프레임 (labeling_rules.md).
@@ -28,7 +28,7 @@ from quality import correct, settings_string
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--raw", required=True, help="녹화 폴더들(<ID>_exo_front 등)이 있는 상위 폴더")
+    ap.add_argument("--raw", required=True, help="exo_front/, exo_left/, exo_right/, ego/ 가 있는 상위 폴더")
     ap.add_argument("--id", required=True)
     ap.add_argument("--task", required=True, choices=TASKS)
     ap.add_argument("--collector", required=True)
@@ -55,8 +55,8 @@ def main():
     cams, ref = load_calibs(json.load(open(a.calib)))
     names = [ref] + [c for c in cams if c != ref]          # 기준 카메라를 맨 앞에
     raw, out = Path(a.raw), Path(a.out) / a.id
-    folder = {c: raw / f"{a.id}_exo_{c}" for c in names}
-    folder["ego"] = raw / f"{a.id}_ego"
+    folder = {c: raw / f"exo_{c}" / a.id for c in names}
+    folder["ego"] = raw / "ego" / a.id
     missing = [str(p) for p in folder.values() if not p.is_dir()]
     if missing:
         raise SystemExit(f"[중단] 녹화 폴더 없음: {missing}")
