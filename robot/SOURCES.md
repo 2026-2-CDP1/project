@@ -19,7 +19,7 @@
 | body `link7` | link `iiwa_link_7` |
 | site `attachment_site` (link7 + 0.045 m, 플랜지) | link `iiwa_link_ee_kuka` (위치·방향 같음. `iiwa_link_ee`는 위치만 같고 y축으로 -90° 돌아가 있음) |
 
-## 1차 확인 (그리퍼·TCP 추가 전)
+## 1차 확인 (TCP = 플랜지, 그리퍼 없음)
 
 - 관절 한계: 원본 MJCF는 소수 5자리로 반올림돼 있어 URDF와 최대 4.9e-6 rad 차이 → MJCF를 URDF 값(제조사 사양 ±170° / ±120° / ±175°)으로 맞춤. 이후 차이 0 (`joint_limits.csv`)
 - FK: 관절 한계 내 무작위 자세 200개(seed 0), link7 기준 최대 위치 차이 1.1e-15 m, 최대 방향 차이 2.3e-15 rad → 일치
