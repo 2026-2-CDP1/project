@@ -283,7 +283,7 @@ git -C ~/project branch -D results/metrics-summary
 ```
 project/
 ├── robot/       # 1번: 팔 모델(robot.urdf, robot.xml), joint_limits.csv, fk_check.md, sim_decision.md
-├── sync/        # 2번: protocol.md, exo_calib.json, sync.csv
+├── sync/        # 2번: protocol.md, camera_setup.md, sync.csv, upright_<날짜>.csv, setups.csv, exo_calib/
 ├── episodes/    # 3번: <에피소드ID>/ 영상·키포인트·라벨·meta.json
 ├── retarget/    # 4번: common.py, config.json, <알고리즘>/<에피소드ID>.npz
 ├── replay/      # 5-1번: replay.py, 나란히 보기 영상
@@ -299,6 +299,10 @@ project/
 - 단위: 길이 m, 각도 rad, 시간 s
 - 쿼터니언 저장 순서: **(w, x, y, z)** — scipy `as_quat()` 기본값은 (x, y, z, w)이므로 변환 필요
 - 좌표계: 영상 좌표는 테이블 좌표계(2번 정의), 로봇 궤적은 로봇 베이스 좌표계
+- **영상 방향·카메라 보정: `sync/camera_setup.md` 규칙을 따른다** (영상·키포인트·좌표를 다루는 역할 모두)
+  - 영상은 **저장된 그대로** 읽는다 (`cv2.CAP_PROP_ORIENTATION_AUTO = 0`). 폰의 회전 꼬리표(0/90/180/270)는 믿을 수 없어서 무시
+  - 거꾸로 찍힌 영상은 `sync/upright_<날짜>.csv`의 `upright_rot`만큼 **메모리에서만** 세워서 인식·학습 이미지에 쓰고, 좌표는 저장 화면 기준으로 되돌려 저장 (원본 파일은 고치지 않음)
+  - 보정은 날짜가 아니라 **배치**(폰을 다시 끼우기 전까지) 단위. 에피소드마다 `sync/setups.csv`로 `sync/exo_calib/` 보정 파일을 고른다. 체커보드가 없는 배치는 다른 카메라와 손 키포인트로 추정
 - 설정·지표 정의는 **결과 보기 전에 고정**. 바꾸면 이유 기록 후 모든 알고리즘에 재적용
 - 풀이 실패·키포인트 누락은 **지우지 않고 기록** (그 자체가 비교 지표)
 - 결과 넘기기 전에 받는 사람에게 파일 한두 개로 먼저 확인
