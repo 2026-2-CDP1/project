@@ -1,0 +1,6 @@
+# episodes/tools (수집·가공) 실행에 필요한 패키지.
+# 서버에서는 공유 robot 환경이 아니라 별도 conda 환경(episodes)에 설치한다: bash episodes/setup_env.sh
+numpy
+scipy
+opencv-python-headless
+mediapipe
