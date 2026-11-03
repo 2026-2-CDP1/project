@@ -158,3 +158,15 @@ cj = {"ref_camera": "front", "cameras": {n: {"K": Kc.tolist(), "R": c[1].tolist(
 cs, ref = load_calibs(cj); assert ref == "front" and list(cs) == ["front", "left", "right"]
 cs, ref = load_calibs(cj["cameras"]["front"]); assert ref == "front" and len(cs) == 1
 print("selftest 11~14 (삼각측량) OK")
+
+# 11) 녹화 폴더 배치: <ID>_<cam> 과 <cam>/<ID> 모두
+import tempfile
+from pathlib import Path
+from io_utils import find_episode_folder
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    (td / "exo_left" / "T1_E001").mkdir(parents=True); (td / "T1_E001_ego").mkdir()
+    assert find_episode_folder(td, "T1_E001", "exo_left") == td / "exo_left" / "T1_E001"
+    assert find_episode_folder(td, "T1_E001", "ego") == td / "T1_E001_ego"
+    assert not find_episode_folder(td, "T1_E001", "exo_front").is_dir()
+print("selftest 11 OK")

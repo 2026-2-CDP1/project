@@ -1,6 +1,7 @@
 """원본 촬영물 -> episodes/<ID>/ 형식 (역할 가이드 4~6, 8, 9단계). exo 3대 삼각측량 버전.
 
-입력: --raw 아래에 프로토콜 이름 규칙대로 바꾼 녹화 폴더 (폴더 안 파일은 앱이 만든 그대로)
+입력: --raw 아래 녹화 폴더 (폴더 안 파일은 앱이 만든 그대로). 두 배치 모두 읽는다:
+  (a) <raw>/T1_E001_exo_front/ ...   (b) 서버 배치 <raw>/exo_front/T1_E001/ ...
   <raw>/T1_E001_exo_front/  data.mov, data.jsonl, ...   <- 기준 카메라 (라벨·프레임 번호의 'exo')
   <raw>/T1_E001_exo_left/
   <raw>/T1_E001_exo_right/
@@ -22,7 +23,7 @@ import extractors as ex
 from hand_math import sync_ego_to_exo, wrist_pose_series
 from multiview import load_calibs, align_to_ref, triangulate_series, tri_report, DEFAULT_TRI
 from constants import TASKS, CASES, SPLITS
-from io_utils import read_frame_times, find_video, read_sync_row, SyncError
+from io_utils import read_frame_times, find_video, find_episode_folder, read_sync_row, SyncError
 from quality import correct, settings_string
 
 
@@ -55,8 +56,8 @@ def main():
     cams, ref = load_calibs(json.load(open(a.calib)))
     names = [ref] + [c for c in cams if c != ref]          # 기준 카메라를 맨 앞에
     raw, out = Path(a.raw), Path(a.out) / a.id
-    folder = {c: raw / f"{a.id}_exo_{c}" for c in names}
-    folder["ego"] = raw / f"{a.id}_ego"
+    folder = {c: find_episode_folder(raw, a.id, f"exo_{c}") for c in names}
+    folder["ego"] = find_episode_folder(raw, a.id, "ego")
     missing = [str(p) for p in folder.values() if not p.is_dir()]
     if missing:
         raise SystemExit(f"[중단] 녹화 폴더 없음: {missing}")

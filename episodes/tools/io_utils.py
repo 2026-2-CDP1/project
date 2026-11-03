@@ -62,6 +62,16 @@ def find_video(folder):
     return vids[0]
 
 
+def find_episode_folder(raw, episode_id, cam):
+    """녹화 폴더 위치. cam: 'exo_front' 같은 카메라 이름 또는 'ego'. 두 배치를 모두 받는다.
+      1) <raw>/<ID>_<cam>/      (프로토콜 이름 규칙대로 바꾼 폴더)
+      2) <raw>/<cam>/<ID>/      (서버 ~/data/raw/<날짜>/ 배치: 카메라별 폴더 아래 에피소드)
+    둘 다 없으면 1)의 경로를 돌려준다 (호출한 쪽이 없다고 안내하도록)."""
+    raw = Path(raw)
+    cands = [raw / f"{episode_id}_{cam}", raw / cam / episode_id]
+    return next((p for p in cands if p.is_dir()), cands[0])
+
+
 class SyncError(Exception):
     pass
 
