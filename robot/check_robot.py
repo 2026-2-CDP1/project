@@ -6,8 +6,7 @@
     python robot/check_robot.py --out ~/out/본인이름/robot_check            # 로드·한계·FK만
     MUJOCO_GL=egl python robot/check_robot.py --out ~/out/본인이름/robot_check --render
 
-비교 프레임: 그리퍼·TCP가 붙기 전에는 플랜지(MJCF site `attachment_site` ↔ URDF `iiwa_link_ee_kuka`).
-TCP가 추가되면 --mj-site tcp --pin-frame tcp 로 같은 검사를 다시 돌린다.
+비교 프레임: 플랜지 = TCP (그리퍼 없음, 2026-11-03), MJCF site `attachment_site` ↔ URDF `iiwa_link_ee_kuka`.
 """
 import argparse
 import csv
