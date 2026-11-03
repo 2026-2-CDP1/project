@@ -22,6 +22,11 @@ conda activate "$ENV_NAME"
 export PATH="$CONDA_PREFIX/bin:$PATH"
 
 pip install -r "$HERE/requirements.txt"
+
+# mediapipe 가 끌고 온 OpenCV 를 headless 하나로 정리 (두 종류가 섞이면 cv2 가 깨짐)
+pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python || true
+pip install --no-deps opencv-contrib-python-headless==4.11.0.86
+python -c "import mediapipe as mp; assert hasattr(mp, 'solutions'), 'mediapipe 에 solutions 없음 (0.10.21 필요)'"
 python -c "import cv2, mediapipe, scipy, numpy; print('ok', numpy.__version__)"
 
 cat <<MSG
