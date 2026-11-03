@@ -4,7 +4,7 @@
 5-2(지표 계산, 신서연), 6(RLDS 변환 검증, 차서현), 8(예측 궤적 확인, 정구현)이 이 함수를 쓴다.
 
 > **함수 형태 고정 (v1, 2026-10-16).** 아래 입력·반환 형태는 바꾸지 않는다. 바꿔야 하면 쓰는 사람(5-2·6·8번)에게 먼저 알리고 이 문서의 변경 기록에 적는다.
-> 내부 구현(모델 파일, TCP, 그리퍼, 장애물 장면)은 형태를 유지한 채 바뀔 수 있다.
+> 내부 구현(모델 파일, 장애물 장면)은 형태를 유지한 채 바뀔 수 있다.
 
 ---
 
@@ -21,13 +21,13 @@ out = replay(q_traj, gripper=None)
 | 인자 | 형태 | 단위 | 설명 |
 |---|---|---|---|
 | `q_traj` | `(T, 7)` float | rad | 팔 관절 각도. 열 순서 `joint1` ~ `joint7` (`robot/robot.xml`). NaN·inf 불가 |
-| `gripper` | `(T,)` float 또는 `None` | 0~1 | 그리퍼 벌림 (0 닫힘, 1 열림). 그리퍼가 붙기 전에는 무시됨 |
+| `gripper` | `(T,)` float 또는 `None` | 0~1 | **그리퍼를 쓰지 않아 항상 무시됨.** 함수 형태를 지키려고 인자만 남겨 둠 (형태만 검사) |
 
 ### 반환 (`dict`)
 
 | 키 | 형태 | 단위 | 설명 |
 |---|---|---|---|
-| `tcp_pos` | `(T, 3)` | m | TCP 위치, **로봇 베이스 좌표** |
+| `tcp_pos` | `(T, 3)` | m | TCP(= 플랜지 `attachment_site`) 위치, **로봇 베이스 좌표** |
 | `tcp_quat` | `(T, 4)` | — | TCP 방향, 쿼터니언 **(w, x, y, z)** |
 | `contacts` | 길이 `T`의 리스트 | — | 프레임마다 `[(몸체1, 몸체2, 거리_m), ...]`. **거리가 음수면 두 몸체가 서로 파고든 것** |
 | `meta` | dict | — | `model`(모델 경로), `tcp_site`(TCP로 쓴 site 이름), `robot_bodies`(로봇 몸체 이름 목록), `collision_exclude`(검사에서 뺀 몸체 쌍) |
@@ -45,7 +45,7 @@ out = replay(q_traj, gripper=None)
 ## 재생 방식 (바꾸지 않는 것)
 
 - **기구학 재생:** 프레임마다 `qpos`에 관절 각도를 그대로 넣고 `mujoco.mj_forward`로 위치·접촉만 계산. `mj_step`은 쓰지 않는다 (중력·제어기가 각도를 바꿈)
-- 팔 이외 관절(그리퍼 등)은 keyframe `home` 값으로 둔다
+- 팔 이외 관절은 없다 (그리퍼 없음). 전체 `qpos`는 keyframe `home` 값에서 시작해 팔 7관절만 바꾼다
 - 접촉은 MuJoCo가 계산한 것 그대로. 단 `robot.xml`의 `<exclude>` 목록 대신 **`COLLISION_EXCLUDE`(2쌍, `collision_exclude.md`)**로 바꿔 읽는다. 원본 `robot.xml`은 건드리지 않는다
 
 ---
@@ -54,11 +54,11 @@ out = replay(q_traj, gripper=None)
 
 | 항목 | 지금 | 바뀔 때 |
 |---|---|---|
-| 모델 | `robot/robot.xml` (Menagerie iiwa14) | 1번이 그리퍼·TCP를 붙이면 같은 파일 |
-| TCP | `tcp` site가 없어서 **`attachment_site`(플랜지)** 사용, 경고 출력 → **비교용 값으로 쓰지 말 것** | 1번이 `tcp` site를 추가하면 자동으로 그것을 씀 |
-| 그리퍼 | 없음 → `gripper` 무시, 경고 출력 | 1번 `robot/gripper.csv`가 생기면 0~1을 관절값으로 옮겨 넣음 |
+| 모델 | `robot/robot.xml` (Menagerie iiwa14), 끝단 장치 없음 | — |
+| TCP | **`attachment_site`(플랜지)** — 그리퍼를 쓰지 않아 플랜지를 TCP로 확정 (2026-11-03 팀 결정) | — |
+| 그리퍼 | **쓰지 않음** → `gripper` 인자는 형태만 검사하고 무시 | — |
 | 충돌 형상 | 링크마다 구(sphere) 여러 개 (메시 아님) | — |
-| 충돌 제외 쌍 | **2쌍** (base–link1, link5–link7). 원본 7쌍 중 나머지 5쌍은 닿지 않아 검사에 넣음 — `collision_exclude.md` (초안, 멘토 확인 전) | 그리퍼가 붙으면 다시 검사 |
+| 충돌 제외 쌍 | **2쌍** (base–link1, link5–link7). 원본 7쌍 중 나머지 5쌍은 닿지 않아 검사에 넣음 — `collision_exclude.md` (초안, 멘토 확인 전) | 모델이 바뀌면 다시 검사 |
 | 환경(테이블·장애물) | 없음 → 접촉은 모두 자기 접촉 | 장애물 시나리오가 확정되면 장면 파일 추가 |
 | 좌표 | 로봇 `base`가 월드 원점 → MuJoCo 월드 좌표 = 로봇 베이스 좌표 | — |
 
@@ -86,3 +86,4 @@ python replay/replay.py --check --out ~/out/본인이름/replay_check
 |---|---|---|
 | 2026-10-16 | v1 | 함수 형태 고정, 기구학 재생 구현 (플랜지 TCP, 그리퍼 없음) |
 | 2026-10-16 | v1.1 | 충돌 제외 쌍을 원본 7쌍 → 2쌍 (`collision_exclude.md`), `meta`에 `collision_exclude` 추가. 함수 형태는 그대로 |
+| 2026-11-03 | v1.2 | 그리퍼를 쓰지 않기로 함 → TCP를 플랜지 `attachment_site`로 확정, 플랜지·그리퍼 경고 삭제. `gripper` 인자는 남기고 무시. 함수 형태는 그대로 |
