@@ -95,7 +95,7 @@ exit
 
 | 항목 | 결정 |
 |---|---|
-| 타깃 로봇 | **KUKA LBR iiwa14 (R820)**, 7자유도 single-arm + 그리퍼 (평행 그리퍼 모델은 직접 추가) |
+| 타깃 로봇 | **KUKA LBR iiwa14 (R820)**, 7자유도 single-arm, **그리퍼 없음** → TCP = 플랜지 (MJCF `attachment_site`) (2026-11-03 결정) |
 | 시뮬레이터 | **MuJoCo** (Isaac Sim 불가 판정, 4절 참고) |
 | 촬영 장비 | iPhone (멘토 추천 앱: NeRFCapture / Spectacular Rec / AR Recorder — 연속 녹화가 기본인 Spectacular Rec 우선 테스트) |
 | 학습 모델 | OpenVLA-7B + LoRA, 대표 알고리즘 1개 데이터로 1회 |
@@ -282,7 +282,7 @@ git -C ~/project branch -D results/metrics-summary
 
 ```
 project/
-├── robot/       # 1번: 팔 모델(robot.urdf, robot.xml), joint_limits.csv, gripper.csv, fk_check.md, sim_decision.md
+├── robot/       # 1번: 팔 모델(robot.urdf, robot.xml), joint_limits.csv, fk_check.md, sim_decision.md
 ├── sync/        # 2번: protocol.md, exo_calib.json, sync.csv
 ├── episodes/    # 3번: <에피소드ID>/ 영상·키포인트·라벨·meta.json
 ├── retarget/    # 4번: common.py, config.json, <알고리즘>/<에피소드ID>.npz
@@ -321,10 +321,10 @@ project/
    - MJCF는 MuJoCo Menagerie `kuka_iiwa_14`, URDF는 Drake 모델. iiwa7과 링크 길이가 다르니 섞이지 않게 주의
    - 알고리즘 C는 SEW 각 방식(stereo-sew)으로 적용 → 4번 담당과 함께 확인
 2. 모델 확인 — 서버엔 모니터가 없으므로 `mujoco.viewer` 대신 **GPU 노드에서 오프스크린 렌더링(`MUJOCO_GL=egl`)으로 PNG 저장** 후 VS Code Remote-SSH 또는 scp로 확인
-3. TCP 정의 (그리퍼 두 손가락 끝 중간점, MJCF는 site / URDF는 고정 관절 링크)
+3. TCP 정의 — 그리퍼를 쓰지 않아 **플랜지로 확정** (2026-11-03): MJCF `attachment_site` / URDF `iiwa_link_ee_kuka`
 4. `joint_limits.csv` — 두 파일 관절 한계 비교·일치
 5. FK 일치 검사 — 무작위 자세 200개, TCP 위치·방향 차이 ≤ 1e-6 → `fk_check.md`
-6. `gripper.csv` — 그리퍼 열림/닫힘 관절값과 손가락 폭(m)
+6. ~~`gripper.csv`~~ — 그리퍼를 쓰지 않아 필요 없음 (2026-11-03)
 7. 4번·5-1번 담당이 `robot/` 파일을 로드해 보는지 확인
 
 ### 보류·확인 필요
