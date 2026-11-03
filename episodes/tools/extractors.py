@@ -15,13 +15,15 @@ _HAND = {"wrist": 0, "thumb_tip": 4, "index_mcp": 5, "index_tip": 8, "pinky_mcp"
 _POSE = {"right": {"shoulder": 12, "elbow": 14}, "left": {"shoulder": 11, "elbow": 13}}
 
 
-def _frames(path):
+def _frames(path, max_frames=None):
     import cv2
     cap = cv2.VideoCapture(str(path))
-    while True:
+    n = 0
+    while max_frames is None or n < max_frames:
         ok, bgr = cap.read()
         if not ok:
             break
+        n += 1
         yield cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     cap.release()
 
@@ -46,12 +48,12 @@ def _pick_hand(res, hand, mirrored=False):
     return None
 
 
-def extract_exo_2d(video_path, hand="right", mirrored=False):
+def extract_exo_2d(video_path, hand="right", mirrored=False, max_frames=None):
     import mediapipe as mp
     H, P = mp.solutions.hands, mp.solutions.pose
     out = []
     with H.Hands(max_num_hands=2, model_complexity=1) as hands, P.Pose(model_complexity=1) as pose:
-        for rgb in _frames(video_path):
+        for rgb in _frames(video_path, max_frames):
             h, w = rgb.shape[:2]
             row = np.full((len(EXO_NAMES), 2), np.nan)
             hl = _pick_hand(hands.process(rgb), hand, mirrored)
