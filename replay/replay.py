@@ -13,7 +13,6 @@ mj_step은 쓰지 않는다 (중력·제어기가 각도를 바꿔 버림). 함�
 """
 import argparse
 import re
-import warnings
 from collections import Counter
 from pathlib import Path
 
@@ -23,7 +22,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL = REPO / "robot" / "robot.xml"
 ARM_JOINTS = [f"joint{i}" for i in range(1, 8)]
-TCP_SITES = ("tcp", "attachment_site")  # 앞에 있는 것부터 찾는다. tcp는 그리퍼가 붙은 뒤 1번이 추가
+TCP_SITE = "attachment_site"  # 그리퍼를 쓰지 않으므로 플랜지를 TCP로 쓴다 (2026-11-03 팀 결정)
 # 자기 충돌 검사에서 빼는 몸체 쌍. 근거는 replay/collision_exclude.md. robot.xml의 <exclude>는 이 목록으로 바꿔 읽는다
 COLLISION_EXCLUDE = {("base", "link1"), ("link5", "link7")}
 
@@ -54,14 +53,12 @@ class Replayer:
         self.arm_adr = np.array([self.m.jnt_qposadr[self.m.joint(n).id] for n in ARM_JOINTS])
 
         names = [mujoco.mj_id2name(self.m, mujoco.mjtObj.mjOBJ_SITE, i) for i in range(self.m.nsite)]
-        self.tcp_site = next((s for s in TCP_SITES if s in names), None)
-        if self.tcp_site is None:
-            raise ValueError(f"TCP site가 없음: {TCP_SITES} 중 하나가 {self.model_path}에 있어야 함")
-        if self.tcp_site != "tcp":
-            warnings.warn(f"'tcp' site가 아직 없어 '{self.tcp_site}'(플랜지)를 TCP로 씀. 비교용 값으로 쓰지 말 것")
+        if TCP_SITE not in names:
+            raise ValueError(f"TCP site '{TCP_SITE}'가 {self.model_path}에 없음")
+        self.tcp_site = TCP_SITE
         self.tcp_id = self.m.site(self.tcp_site).id
 
-        # 팔 이외 관절(그리퍼 등)의 기본값: keyframe "home", 없으면 qpos0
+        # 전체 qpos 기본값: keyframe "home", 없으면 qpos0 (지금 모델은 팔 7관절뿐)
         key = next((k for k in range(self.m.nkey) if self.m.key(k).name == "home"), None)
         self.q_full_home = (self.m.key_qpos[key] if key is not None else self.m.qpos0).copy()
 
@@ -71,7 +68,6 @@ class Replayer:
             self.m.body(i).name for i in range(self.m.nbody)
             if i == base or self._is_descendant(i, base)
         }
-        self.has_gripper = False  # 그리퍼 관절·gripper.csv가 생기면 여기서 읽는다
 
     def _is_descendant(self, i, root):
         while i != 0:
@@ -90,8 +86,7 @@ class Replayer:
             gripper = np.asarray(gripper, dtype=float)
             if gripper.shape != (len(q_traj),):
                 raise ValueError(f"gripper는 (T,)이어야 함: {gripper.shape}")
-            if not self.has_gripper:
-                warnings.warn("모델에 그리퍼가 아직 없어 gripper 값은 무시함")
+            # 그리퍼를 쓰지 않으므로 형태만 검사하고 값은 쓰지 않는다 (함수 형태 유지용 인자)
 
         T = len(q_traj)
         tcp_pos = np.zeros((T, 3))
