@@ -15,7 +15,7 @@ T2_E025,exo_front,start,54,
 T2_E025,exo_left,start,63,
 T2_E025,exo_right,start,60,
 T2_E025,ego,start,22,
-T2_E027,exo_front,start,95,
+T2_E027,exo_front,start,93,front 다시 확인 (95 -> 93)
 T2_E027,exo_left,start,102,
 T2_E027,exo_right,start,102,
 T2_E027,ego,start,36,
