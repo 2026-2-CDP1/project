@@ -283,7 +283,7 @@ git -C ~/project branch -D results/metrics-summary
 ```
 project/
 ├── robot/       # 1번: 팔 모델(robot.urdf, robot.xml), joint_limits.csv, fk_check.md, sim_decision.md
-├── sync/        # 2번: README.md(먼저 읽기), sync.csv, exo_calib_T{n}.json, manual_T{n}.csv, protocol.md, camera_setup.md, 싱크·보정 코드
+├── sync/        # 2번: README.md(먼저 읽기), sync.csv, exo_calib_T{n}.json, protocol.md, 싱크·보정 코드
 ├── episodes/    # 3번: <에피소드ID>/ 영상·키포인트·라벨·meta.json
 ├── retarget/    # 4번: common.py, config.json, <알고리즘>/<에피소드ID>.npz
 ├── replay/      # 5-1번: replay.py, 나란히 보기 영상
@@ -299,7 +299,7 @@ project/
 - 단위: 길이 m, 각도 rad, 시간 s
 - 쿼터니언 저장 순서: **(w, x, y, z)** — scipy `as_quat()` 기본값은 (x, y, z, w)이므로 변환 필요
 - 좌표계: 영상 좌표는 테이블 좌표계(2번 정의), 로봇 궤적은 로봇 베이스 좌표계
-- **영상 방향·카메라 보정: `sync/camera_setup.md` 규칙을 따른다** (영상·키포인트·좌표를 다루는 역할 모두)
+- **영상 방향·카메라 보정: `sync/protocol.md` 8절 규칙을 따른다** (영상·키포인트·좌표를 다루는 역할 모두)
   - 영상은 **저장된 그대로** 읽는다 (`cv2.CAP_PROP_ORIENTATION_AUTO = 0`). 폰의 회전 꼬리표(0/90/180/270)는 믿을 수 없어서 무시
   - 거꾸로 찍힌 영상은 `sync/upright_<날짜>.csv`의 `upright_rot`만큼 **메모리에서만** 세워서 인식·학습 이미지에 쓰고, 좌표는 저장 화면 기준으로 되돌려 저장 (원본 파일은 고치지 않음)
   - 보정은 **태스크 단위**: 태스크마다 체커보드 `T{n}_check`로 만든 `sync/exo_calib_T{n}.json`을 쓴다. 에피소드 ID의 태스크 번호로 고른다 (`T2_E017` → `exo_calib_T2.json`)
