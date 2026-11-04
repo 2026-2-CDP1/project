@@ -33,9 +33,10 @@ def _frames(path, max_frames=None):
 
 
 def _ego_label(hand, mirrored):
-    """ego 에서 찾을 MediaPipe 손 라벨. 1인칭(손등이 보임) 영상은 반전하지 않아도 실제 오른손이 "Right" 로 나온다
-    (T1_E052 60프레임: Right 21 / Left 3). 셀카처럼 반전된 영상이면 반대."""
-    if not mirrored:
+    """ego 에서 찾을 MediaPipe 손 라벨. Hands 는 입력이 셀카처럼 반전됐다고 가정하고 라벨을 붙여서,
+    반전하지 않은 영상에서는 실제 왼손이 "Right" 로 나온다 (왼손 에피소드 T1_E052: Right 21 / Left 3,
+    맞바꿔 찾으면 pinch 검출 0.40, 그대로 찾으면 0.06). 반전된 영상이면 그대로."""
+    if mirrored:
         return hand
     return "left" if hand == "right" else "right"
 
