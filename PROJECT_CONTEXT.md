@@ -283,7 +283,7 @@ git -C ~/project branch -D results/metrics-summary
 ```
 project/
 ├── robot/       # 1번: 팔 모델(robot.urdf, robot.xml), joint_limits.csv, fk_check.md, sim_decision.md
-├── sync/        # 2번: protocol.md, camera_setup.md, sync.csv, upright_<날짜>.csv, setups.csv, exo_calib/
+├── sync/        # 2번: README.md(먼저 읽기), sync.csv, exo_calib_T{n}.json, manual_T{n}.csv, protocol.md, camera_setup.md, 싱크·보정 코드
 ├── episodes/    # 3번: <에피소드ID>/ 영상·키포인트·라벨·meta.json
 ├── retarget/    # 4번: common.py, config.json, <알고리즘>/<에피소드ID>.npz
 ├── replay/      # 5-1번: replay.py, 나란히 보기 영상
@@ -302,7 +302,8 @@ project/
 - **영상 방향·카메라 보정: `sync/camera_setup.md` 규칙을 따른다** (영상·키포인트·좌표를 다루는 역할 모두)
   - 영상은 **저장된 그대로** 읽는다 (`cv2.CAP_PROP_ORIENTATION_AUTO = 0`). 폰의 회전 꼬리표(0/90/180/270)는 믿을 수 없어서 무시
   - 거꾸로 찍힌 영상은 `sync/upright_<날짜>.csv`의 `upright_rot`만큼 **메모리에서만** 세워서 인식·학습 이미지에 쓰고, 좌표는 저장 화면 기준으로 되돌려 저장 (원본 파일은 고치지 않음)
-  - 보정은 날짜가 아니라 **배치**(폰을 다시 끼우기 전까지) 단위. 에피소드마다 `sync/setups.csv`로 `sync/exo_calib/` 보정 파일을 고른다. 체커보드가 없는 배치는 다른 카메라와 손 키포인트로 추정
+  - 보정은 **태스크 단위**: 태스크마다 체커보드 `T{n}_check`로 만든 `sync/exo_calib_T{n}.json`을 쓴다. 에피소드 ID의 태스크 번호로 고른다 (`T2_E017` → `exo_calib_T2.json`)
+- **카메라 간 시간 맞추기: `sync/sync.csv`** — 기준 카메라 `exo_front` 대비 `left`·`right`·`ego` 시간 차. `episodes/tools/io_utils.read_sync_row`로 읽는다. 쓰는 법·열 뜻은 `sync/README.md`
 - 설정·지표 정의는 **결과 보기 전에 고정**. 바꾸면 이유 기록 후 모든 알고리즘에 재적용
 - 풀이 실패·키포인트 누락은 **지우지 않고 기록** (그 자체가 비교 지표)
 - 결과 넘기기 전에 받는 사람에게 파일 한두 개로 먼저 확인
@@ -319,6 +320,8 @@ project/
 - [x] 로컬 ↔ GitHub 연결 확인 (정구현)
 - [x] 작업 흐름 확정: 노트북 브랜치 → PR → main / 서버는 main pull·실행 전용
 - [x] 서버 `~/project` 설정: `pull.ff only`, 팀원별 커밋 명령 `git c 본인이름` 등록, main 동기화 확인
+- [x] 원본 데이터 서버 정리 (2026-11-04): `~/data/raw/T{1,2,3}/{exo_front,exo_left,exo_right,ego}/T{n}_E001~E075` + 체커보드 `T{n}_check`, 원본 zip은 `~/data/staging/`
+- [x] 2번 싱크·보정 (신서연, 2026-11-04): `sync/sync.csv` T1~T3 675행 모두 `usable=1` (검증 오차 최대 36 ms), `sync/exo_calib_T1~T3.json` (재투영 오차 평균 0.82~1.06 px) → `sync/README.md`
 
 ### 다음 (1번 역할: 로봇·시뮬레이터 셋업)
 1. KUKA LBR iiwa14 (R820)의 URDF·MJCF 확보 (출처는 `robot/SOURCES.md`)
