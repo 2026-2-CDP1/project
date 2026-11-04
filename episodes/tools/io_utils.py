@@ -72,6 +72,11 @@ def find_episode_folder(raw, episode_id, cam):
     return next((p for p in cands if p.is_dir()), cands[0])
 
 
+def kp_cache_path(cache, cam, episode_id, hand):
+    """extract_all.py 가 저장하는 영상 전체 2D(exo) / pinch(ego) 위치. process_episode.py --cache 가 읽는다."""
+    return Path(cache) / cam / f"{episode_id}_{hand}.npy"
+
+
 class SyncError(Exception):
     pass
 
