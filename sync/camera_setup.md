@@ -150,13 +150,13 @@ u, v = (u_, v_) if r == 0 else (W - 1 - u_, H - 1 - v_)
 - [x] 10/19 체커보드 영상 확인 → 서버 폴더 이름 `1019_check`로 변경 (ego `18-25-36`, front `18-26-22`, left `18-25-39`)
 - [x] `sync/orientation.py` 작성·시험 (22개 정답)
 - [ ] `sync/upright_20261019.csv`, `sync/upright_20261103.csv` (서버 전체 실행 + 육안 확인)
-- [ ] `sync/sync.csv` 전체 (지금은 11/03 T1_E006–E015 테스트 10개만)
+- [x] `sync/sync.csv` 전체 — `~/data/raw/T1~T3` 각 225행, 모두 usable (`sync/README.md`)
 - [ ] 체커보드 배치 보정 다시 계산 → `sync/exo_calib/`
 - [ ] 데이터 추정 (right B, front B·C) + T1 검증
 - [ ] `sync/setups.csv`
 - [ ] `protocol.md` 보완: 카메라 4대, 폴더 이름 규칙, 화면 회전 잠금, 폰을 다시 끼우면 체커보드 다시 찍기
 
-> **주의:** 지금 main의 `sync/exo_calib.json`(11/03 T1)은 right 값이 꼬리표대로 돌린 화면으로 계산돼 있어 **저장 화면 기준과 180° 어긋난다.** `sync/exo_calib/`로 바뀌기 전까지 right를 3D 계산에 쓰지 말 것. front·left 값은 꼬리표가 0이라 맞다.
+> **2026-11-04 갱신:** 예전 `sync/exo_calib.json`(11/03 `1103_check`)은 삭제했다. 지금 서버 데이터(`~/data/raw/T1~T3`)는 태스크마다 체커보드(`T{n}_check`)가 있어 **`sync/exo_calib_T{n}.json`**을 쓴다 (`sync/README.md`). 위 4절 배치 표와 `sync/exo_calib/`·`setups.csv` 계획은 예전 날짜별 데이터 기준이다.
 
 ---
 
