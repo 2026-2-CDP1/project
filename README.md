@@ -18,7 +18,7 @@ project/
 ├── robot/       # 1. 로봇·시뮬레이터 셋업 — 팔 모델(URDF/MJCF), 관절 한계표
 ├── sync/        # 2. 촬영 프로토콜·싱크 — 촬영 절차, 카메라 보정, 싱크 표
 ├── episodes/    # 3. 수집·가공 — 에피소드별 영상, 키포인트, 라벨, 메타데이터
-├── retarget/    # 4. 리타게팅 — 알고리즘별 관절 궤적 (A_DLS, B_mink, C_ikgeo, D_pyroki)
+├── retarget/    # 4. 리타게팅 — 알고리즘별 관절 궤적 (A_DLS, B_mink, C_eaik)
 ├── replay/      # 5-1. 궤적 재생 — 시뮬레이터 재생 코드, 나란히 보기 영상
 ├── metrics/     # 5-2. 지표 계산 — 지표 정의서, 계산 코드, 결과 표
 ├── rlds/        # 6. VLA 데이터셋 변환 — RLDS 변환 코드

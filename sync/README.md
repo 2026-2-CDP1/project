@@ -18,7 +18,7 @@
 ~/data/raw/T{1,2,3}/{exo_front, exo_left, exo_right}/T{n}_check/                    (체커보드 영상, 보정용)
 ```
 
-- 태스크 3개 × 에피소드 75개 × 카메라 4대. 원본 zip은 `~/data/staging/`.
+- 태스크 3개 × 에피소드 75개 × 카메라 4대. 원본 zip은 검증 후 서버에서 지웠고 공유 드라이브에 있어요 (`episodes/RAW_DATA.md`).
 - 영상은 **회전 없이 저장된 그대로** 처리했어요 (`protocol.md` 8.1절).
 
 ---

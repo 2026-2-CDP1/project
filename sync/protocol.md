@@ -99,9 +99,8 @@
   ```
   ~/data/raw/T{태스크}/{exo_front, exo_left, exo_right, ego}/T{태스크}_E###/   data.mov, data.jsonl, calibration.json, metadata.json (+ frames2/ : exo_right)
   ~/data/raw/T{태스크}/{exo_front, exo_left, exo_right}/T{태스크}_check/         체커보드 보정 영상
-  ~/data/staging/T{태스크}_{카메라}.zip                                            올린 원본 zip
   ```
-  원본은 읽기 전용으로 씁니다 (이름 변경·삭제·덮어쓰기 금지). 가공 결과는 `~/out/본인이름/`.
+  원본은 읽기 전용으로 씁니다 (이름 변경·삭제·덮어쓰기 금지). 가공 결과는 `~/out/본인이름/`. 원본 zip은 공유 드라이브에 두고, 서버에서는 압축 해제·검증 후 지웁니다.
 - 가이드의 파일 이름과는 아래처럼 대응합니다.
 
   | 가이드 이름 | 우리 폴더 |
