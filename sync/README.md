@@ -19,7 +19,7 @@
 ```
 
 - 태스크 3개 × 에피소드 75개 × 카메라 4대. 원본 zip은 `~/data/staging/`.
-- 영상은 **회전 없이 저장된 그대로** 처리했어요 (`camera_setup.md` 규칙 1).
+- 영상은 **회전 없이 저장된 그대로** 처리했어요 (`protocol.md` 8.1절).
 
 ---
 
@@ -104,7 +104,7 @@ t_ref = t + offset_start_s + drift_s × (t − s0) / (s1 − s0)
 
 **세션 시계 모델이란:** 폰 시계 차는 폰이 잠들지 않는 한 한 촬영 세션 안에서 거의 일정해요 (T1 31분 동안 0.6~12.5 ppm). 믿을 수 있는 박수(기준점) 몇 개로 카메라마다 "시계 차 = a + b × 시각" 직선을 맞추고, 나머지 에피소드는 이 직선으로 계산해요.
 - 기준점은 박수 행 중 **에피소드 안 드리프트가 1프레임 이하**인 것만 써요. 에피소드 수십 초 동안 실제 드리프트는 1 ms 미만이라, 그보다 크면 박수를 잘못 잡은 거예요.
-- T2·T3는 박수가 거의 자동 검출되지 않았어요. 짝짓기 기준값(세션 대표 시간 차)이 0.3~0.8 s 틀려 있었기 때문이에요. 그래서 `manual_T2.csv`·`manual_T3.csv`에 사람이 박수 프레임을 표시했어요.
+- T2·T3는 박수가 거의 자동 검출되지 않았어요. 짝짓기 기준값(세션 대표 시간 차)이 0.3~0.8 s 틀려 있었기 때문이에요. 그래서 사람이 박수 프레임을 표시했어요 (표는 서버 `~/out/신서연/label_T{n}/manual_T{n}.csv`, 레포에는 두지 않음).
 - 녹화 시작 시각 차이가 3 s 넘게 바뀌면(폰이 잠듦) 구간을 나눠 따로 맞춰요. 지금 세 태스크는 모두 한 구간이에요.
 - 자세한 근거와 시험 결과는 `protocol.md` 7절에 있어요.
 
@@ -118,7 +118,7 @@ python label_sheets.py --raw ~/data/raw/T2 --claps ~/out/신서연/claps_T2 --au
     --offsets exo_left=… exo_right=… ego=… --out ~/out/신서연/label_T2
 # ② 시계 모델
 python fit_clock.py --sync ~/out/신서연/sync_T2.csv --raw ~/data/raw/T2 \
-    --cameras exo_left exo_right ego --manual manual_T2.csv --out sync_T2.csv --report clock_T2.csv
+    --cameras exo_left exo_right ego --manual ~/out/신서연/label_T2/manual_T2.csv --out sync_T2.csv --report clock_T2.csv
 ```
 
 - 실행 환경: `~/miniconda3/envs/episodes/bin/python -I` (mediapipe·opencv 있음). `--mem`을 꼭 적어요 (안 적으면 노드 메모리를 전부 잡아요).
@@ -132,20 +132,17 @@ python fit_clock.py --sync ~/out/신서연/sync_T2.csv --raw ~/data/raw/T2 \
 |---|---|---|
 | `sync.csv` | **결과** | 시간 차 표 (T1~T3, 675행) |
 | `exo_calib_T1.json` `exo_calib_T2.json` `exo_calib_T3.json` | **결과** | 태스크별 exo 외부 보정 |
-| `manual_T2.csv` `manual_T3.csv` | 입력 | 손으로 표시한 시작 박수 프레임 (시계 모델 기준점) |
 | `run_task.sh` | 코드 | 태스크 하나 전체 실행 (①) |
 | `detect_claps.py` | 코드 | 영상에서 박수 시각 검출 |
 | `make_sync_csv.py` | 코드 | 박수를 카메라끼리 짝지어 시간 차 표 |
 | `fit_clock.py` | 코드 | 세션 시계 모델로 빈 행 채우기 (②) |
 | `label_sheets.py` | 코드 | 손 표시용 프레임 그림 (③) |
 | `make_exo_calib.py` | 코드 | 체커보드 영상 → 외부 보정 |
-| `protocol.md` | 문서 | 촬영 절차 (3번용), 7절 시간 차 표 규칙 |
-| `camera_setup.md` | 문서 | 영상 방향·카메라 배치·보정 규칙 |
+| `protocol.md` | 문서 | 촬영 절차 (1~6절), 시간 차 표 규칙 (7절), 영상 방향·배치·보정 규칙 (8절) |
 
 ---
 
 ## 6. 주의
 
 - T3 기준점은 E018~E065에 있어요. E001~E017·E066~E075는 직선을 바깥으로 늘린 값이에요 (기울기가 수 ppm이라 영향은 수 ms 예상).
-- `camera_setup.md` 4절의 배치 표(1103_front_B 등)와 `sync/exo_calib/`·`setups.csv` 계획은 예전 날짜별 데이터(10/19·11/03) 기준이에요. 지금 데이터는 태스크마다 체커보드가 있어서 `exo_calib_T{n}.json`을 써요.
 - 다음 촬영부터: 박수는 **빠르게 쳐서 손바닥이 맞닿는 순간이 뚜렷하게** 보이도록 해 주세요. 천천히 손을 모으면 자동 검출이 안 돼요 (T2·T3).
