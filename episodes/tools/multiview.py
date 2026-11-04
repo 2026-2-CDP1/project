@@ -7,7 +7,7 @@
   3) triangulate_series: 프레임·키포인트마다 보이는 카메라(2대 이상)의 광선이 가장 가깝게 만나는 점 (DLT)
      + 재투영 오차 검사. 2대 미만이거나 오차가 크면 NaN.
 
-보정값 규약 (2번 exo_calib.json 과 같음): 테이블 -> 카메라, pc = R @ p + t. K, dist 는 카메라별.
+보정값 규약 (2번 sync/exo_calib_T{n}.json 과 같음, 태스크마다 파일 하나): 테이블 -> 카메라, pc = R @ p + t. K, dist 는 카메라별.
 """
 import numpy as np
 
@@ -19,7 +19,7 @@ DEFAULT_TRI = {
 
 
 def load_calibs(calib: dict):
-    """exo_calib.json -> {카메라 이름: (K, R, t, dist)}, 기준 카메라 이름.
+    """exo_calib_T{n}.json -> {카메라 이름: (K, R, t, dist)}, 기준 카메라 이름.
 
     여러 대: {"ref_camera": "front", "cameras": {"front": {K,R,t,dist}, "left": {...}, "right": {...}}}
     한 대(예전 형식): {K,R,t,dist} -> {"front": ...}

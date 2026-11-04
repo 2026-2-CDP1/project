@@ -1,7 +1,8 @@
 """키포인트를 기준 카메라(exo) 영상에 다시 그려 눈으로 확인 (8단계).
 
-  python overlay.py episodes/T1_E001 ../../sync/exo_calib.json out.mp4
-점이 손·팔 위에 찍히는지, 특히 오른손에 찍히는지(왼손 아님) 파일럿에서 확인한다.
+  python overlay.py episodes/T1_E001 ../../sync/exo_calib_T1.json out.mp4
+보정 파일은 에피소드의 태스크 번호로 고른다 (T2_E017 -> exo_calib_T2.json).
+점이 손·팔 위에 찍히는지, 특히 그 에피소드의 작업 손(records.csv 의 hand)에 찍히는지 확인한다.
 """
 import json, sys
 from pathlib import Path
