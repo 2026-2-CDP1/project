@@ -1,18 +1,19 @@
 """원본 촬영물 -> episodes/<ID>/ 형식 (역할 가이드 4~6, 8, 9단계). exo 3대 삼각측량 버전.
 
 입력: --raw 아래 녹화 폴더 (폴더 안 파일은 앱이 만든 그대로). 두 배치 모두 읽는다:
-  (a) <raw>/T1_E001_exo_front/ ...   (b) 서버 배치 <raw>/exo_front/T1_E001/ ...
+  (a) <raw>/T1_E001_exo_front/ ...   (b) 서버 배치 ~/data/raw/T1/exo_front/T1_E001/ ... (--raw ~/data/raw/T1)
   <raw>/T1_E001_exo_front/  data.mov, data.jsonl, ...   <- 기준 카메라 (라벨·프레임 번호의 'exo')
   <raw>/T1_E001_exo_left/
   <raw>/T1_E001_exo_right/
   <raw>/T1_E001_ego/
-보정값: exo_calib.json 의 cameras.{front,left,right} (테이블 좌표계 공통), ref_camera
+보정값: 태스크별 sync/exo_calib_T{n}.json 의 cameras.{front,left,right} (테이블 좌표계 공통), ref_camera
 시간 차: sync.csv 의 (episode_id, camera) 행. camera = left, right, ego (기준 카메라 대비)
 
 예:
-  python process_episode.py --raw ~/raw --id T1_E001 --task "컵 잡기" --collector 홍길동 \\
+  python process_episode.py --raw ~/data/raw/T1 --id T1_E001 --task "컵 잡기" --collector 홍길동 \\
       --hand right --tags "큰 이동|정밀 구간" --split train --start 95 --end 410 \\
-      --calib ../../sync/exo_calib.json --sync ../../sync/sync.csv --out ~/out/본인이름/episodes
+      --calib ../../sync/exo_calib_T1.json --sync ../../sync/sync.csv --out ~/out/본인이름/episodes \\
+      --cache ~/out/본인이름/kp_cache/T1      (extract_all.py 로 미리 뽑아 둔 2D 를 읽음. 없으면 영상에서 뽑음)
 --start/--end: 기준 카메라 프레임 번호. 시작 = 초기 자세 첫 프레임, 끝 = 종료 자세 도달 프레임 (labeling_rules.md).
 """
 import argparse, json, shutil
@@ -23,7 +24,7 @@ import extractors as ex
 from hand_math import sync_ego_to_exo, wrist_pose_series
 from multiview import load_calibs, align_to_ref, triangulate_series, tri_report, DEFAULT_TRI
 from constants import TASKS, CASES, SPLITS
-from io_utils import read_frame_times, find_video, find_episode_folder, read_sync_row, SyncError
+from io_utils import read_frame_times, find_video, find_episode_folder, read_sync_row, kp_cache_path, SyncError
 from quality import correct, settings_string
 
 
@@ -44,6 +45,7 @@ def main():
     ap.add_argument("--end", type=int, required=True, help="끝 (기준 카메라 프레임, 미포함)")
     ap.add_argument("--max-reproj-px", type=float, default=DEFAULT_TRI["max_reproj_px"])
     ap.add_argument("--mirrored", action="store_true", help="입력 영상이 좌우 반전된 경우")
+    ap.add_argument("--cache", help="extract_all.py 의 --out (있는 카메라는 영상 대신 이걸 읽음)")
     ap.add_argument("--notes", default="")
     a = ap.parse_args()
 
@@ -52,6 +54,13 @@ def main():
     if bad:
         ap.error(f"알 수 없는 케이스 태그 {bad}. 허용: {CASES}")
     split = SPLITS.get(a.split, a.split)
+
+    def cached(cam, extract):
+        """--cache 에 이 카메라 결과가 있으면 읽고, 없으면 영상에서 뽑는다 (extract_all.py 는 mirrored 없이 뽑음)."""
+        p = kp_cache_path(a.cache, cam, a.id, a.hand) if a.cache and not a.mirrored else None
+        if p is not None and p.exists():
+            return np.load(p)
+        return extract()
 
     cams, ref = load_calibs(json.load(open(a.calib)))
     names = [ref] + [c for c in cams if c != ref]          # 기준 카메라를 맨 앞에
@@ -80,7 +89,7 @@ def main():
     uv_views = []
     for c in names:
         t_c = read_frame_times(folder[c])
-        uv_c = ex.extract_exo_2d(find_video(folder[c]), a.hand, a.mirrored)
+        uv_c = cached(f"exo_{c}", lambda: ex.extract_exo_2d(find_video(folder[c]), a.hand, a.mirrored))
         if len(uv_c) != len(t_c):
             raise SystemExit(f"[중단] {c}: 영상 프레임 {len(uv_c)} != 시각 {len(t_c)} (data.jsonl 형식 확인)")
         if c == ref:
@@ -99,7 +108,7 @@ def main():
 
     # 4·5단계: ego 거리 -> 기준 시간축
     t_ego = read_frame_times(folder["ego"])
-    d_ego = ex.extract_ego_pinch(find_video(folder["ego"]), a.hand, a.mirrored)
+    d_ego = cached("ego", lambda: ex.extract_ego_pinch(find_video(folder["ego"]), a.hand, a.mirrored))
     if len(d_ego) != len(t_ego):
         raise SystemExit(f"[중단] ego: 영상 프레임 {len(d_ego)} != 시각 {len(t_ego)}")
     pinch = sync_ego_to_exo(t_ego, d_ego, t_ref, **sync["ego"])
