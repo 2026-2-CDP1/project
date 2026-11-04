@@ -72,6 +72,17 @@ def find_episode_folder(raw, episode_id, cam):
     return next((p for p in cands if p.is_dir()), cands[0])
 
 
+def match_frames(x, t, name=""):
+    """영상에서 뽑은 값 x (프레임 축 0) 를 data.jsonl 시각 t 길이에 맞춘다.
+    앱이 녹화를 멈출 때 마지막 프레임의 시각 줄을 못 쓰는 경우가 있어 영상이 1프레임 많을 수 있다
+    (T1 300개 중 30개, 전부 +1). 그때만 마지막 프레임을 버리고, 그 외 차이는 ValueError."""
+    if len(x) == len(t) + 1:
+        return x[:-1]
+    if len(x) != len(t):
+        raise ValueError(f"{name}: 영상 프레임 {len(x)} != 시각 {len(t)} (data.jsonl 형식 확인)")
+    return x
+
+
 def kp_cache_path(cache, cam, episode_id, hand):
     """extract_all.py 가 저장하는 영상 전체 2D(exo) / pinch(ego) 위치. process_episode.py --cache 가 읽는다."""
     return Path(cache) / cam / f"{episode_id}_{hand}.npy"

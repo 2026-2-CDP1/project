@@ -40,7 +40,7 @@ def run_one(job):
             row["wrist"] = f"{ok[ex.EXO_NAMES.index('wrist')]:.3f}"
             row["shoulder"] = f"{ok[ex.EXO_NAMES.index('shoulder')]:.3f}"
         row.update(frames=len(x), times=n_t)
-        if len(x) != n_t:
+        if len(x) not in (n_t, n_t + 1):           # +1 은 process_episode 가 마지막 프레임을 버려 맞춘다
             row["error"] = "영상 프레임 수 != data.jsonl 시각 수"
         p = kp_cache_path(out, cam, eid, hand)
         p.parent.mkdir(parents=True, exist_ok=True)

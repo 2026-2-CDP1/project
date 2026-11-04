@@ -24,7 +24,7 @@ import extractors as ex
 from hand_math import sync_ego_to_exo, wrist_pose_series
 from multiview import load_calibs, align_to_ref, triangulate_series, tri_report, DEFAULT_TRI
 from constants import TASKS, CASES, SPLITS
-from io_utils import read_frame_times, find_video, find_episode_folder, read_sync_row, kp_cache_path, SyncError
+from io_utils import read_frame_times, find_video, find_episode_folder, read_sync_row, kp_cache_path, match_frames, SyncError
 from quality import correct, settings_string
 
 
@@ -90,8 +90,10 @@ def main():
     for c in names:
         t_c = read_frame_times(folder[c])
         uv_c = cached(f"exo_{c}", lambda: ex.extract_exo_2d(find_video(folder[c]), a.hand, a.mirrored))
-        if len(uv_c) != len(t_c):
-            raise SystemExit(f"[중단] {c}: 영상 프레임 {len(uv_c)} != 시각 {len(t_c)} (data.jsonl 형식 확인)")
+        try:
+            uv_c = match_frames(uv_c, t_c, c)
+        except ValueError as e:
+            raise SystemExit(f"[중단] {e}")
         if c == ref:
             uv_views.append(uv_c[a.start:a.end])
         else:
@@ -109,8 +111,10 @@ def main():
     # 4·5단계: ego 거리 -> 기준 시간축
     t_ego = read_frame_times(folder["ego"])
     d_ego = cached("ego", lambda: ex.extract_ego_pinch(find_video(folder["ego"]), a.hand, a.mirrored))
-    if len(d_ego) != len(t_ego):
-        raise SystemExit(f"[중단] ego: 영상 프레임 {len(d_ego)} != 시각 {len(t_ego)}")
+    try:
+        d_ego = match_frames(d_ego, t_ego, "ego")
+    except ValueError as e:
+        raise SystemExit(f"[중단] {e}")
     pinch = sync_ego_to_exo(t_ego, d_ego, t_ref, **sync["ego"])
 
     # 9단계: 저장
