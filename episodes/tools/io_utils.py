@@ -83,6 +83,13 @@ def match_frames(x, t, name=""):
     return x
 
 
+def read_records(path):
+    """episodes/records.csv (촬영 기록지를 옮긴 표) -> {episode_id: 행 dict}.
+    열: episode_id, task, layout, speed, purpose, case_tags, collector, hand(right/left), notes"""
+    with open(path, newline="", encoding="utf-8") as f:
+        return {r["episode_id"]: r for r in csv.DictReader(f)}
+
+
 def kp_cache_path(cache, cam, episode_id, hand):
     """extract_all.py 가 저장하는 영상 전체 2D(exo) / pinch(ego) 위치. process_episode.py --cache 가 읽는다."""
     return Path(cache) / cam / f"{episode_id}_{hand}.npy"

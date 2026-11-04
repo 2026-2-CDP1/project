@@ -6,6 +6,7 @@ process_episode.py --cache 로 읽으면 구간 자르기·삼각측량·보정�
   # 계산 노드에서 (--mem 꼭 적기)
   sbatch -p p02 -c 32 --mem=48G -o ~/out/seohyeon/extract_T1.log \\
       --wrap "cd ~/project/episodes/tools && python extract_all.py --raw ~/data/raw/T1 --out ~/out/seohyeon/kp_cache/T1 --jobs 32"
+  작업한 손은 ../records.csv (촬영 기록지) 의 hand 를 쓴다. 표에 없는 에피소드는 --hand.
 
 출력(--out):
   <camera>/<ID>_<hand>.npy   exo: (T,K,2) 픽셀 NaN=못 찾음 / ego: (T,) 거리
@@ -17,16 +18,16 @@ from multiprocessing import get_context
 from pathlib import Path
 import numpy as np
 
-from io_utils import find_episode_folder, find_video, read_frame_times, kp_cache_path
+from io_utils import find_episode_folder, find_video, read_frame_times, kp_cache_path, read_records
 
 CAMS = ["exo_front", "exo_left", "exo_right", "ego"]
-FIELDS = ["camera", "episode_id", "frames", "times", "wrist", "shoulder", "pinch", "sec", "error"]
+FIELDS = ["camera", "episode_id", "hand", "frames", "times", "wrist", "shoulder", "pinch", "sec", "error"]
 
 
 def run_one(job):
     raw, out, cam, eid, hand = job
     import extractors as ex
-    row = {"camera": cam, "episode_id": eid}
+    row = {"camera": cam, "episode_id": eid, "hand": hand}
     t0 = time.time()
     try:
         folder = find_episode_folder(raw, eid, cam)
@@ -59,15 +60,18 @@ def main():
     ap.add_argument("--out", required=True, help="~/project 밖, 예: ~/out/seohyeon/kp_cache/T1")
     ap.add_argument("--ids", nargs="*", help="생략하면 exo_front 아래 *_E* 전부")
     ap.add_argument("--cams", nargs="+", default=CAMS)
-    ap.add_argument("--hand", choices=["right", "left"], default="right")
+    ap.add_argument("--records", default=str(Path(__file__).resolve().parent.parent / "records.csv"),
+                    help="촬영 기록지 표 (에피소드별 작업 손)")
+    ap.add_argument("--hand", choices=["right", "left"], default="right", help="--records 에 없는 에피소드에 쓸 손")
     ap.add_argument("--jobs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     ap.add_argument("--redo", action="store_true")
     a = ap.parse_args()
 
     raw, out = Path(a.raw).expanduser(), Path(a.out).expanduser()
     ids = a.ids or sorted(p.name for p in (raw / "exo_front").glob("*_E*") if p.is_dir())
-    jobs = [(raw, out, c, i, a.hand) for i in ids for c in a.cams
-            if a.redo or not kp_cache_path(out, c, i, a.hand).exists()]
+    hand = {k: r["hand"] for k, r in read_records(a.records).items() if r["hand"] in ("right", "left")}
+    jobs = [(raw, out, c, i, hand.get(i, a.hand)) for i in ids for c in a.cams
+            if a.redo or not kp_cache_path(out, c, i, hand.get(i, a.hand)).exists()]
     print(f"에피소드 {len(ids)}개 × 카메라 {len(a.cams)}대 중 할 일 {len(jobs)}개, 병렬 {a.jobs}", flush=True)
     if not jobs:
         return
@@ -86,7 +90,7 @@ def main():
             n_err += bool(row.get("error"))
             rate = (f"pinch {row['pinch']}" if "pinch" in row else
                     f"wrist {row['wrist']} shoulder {row['shoulder']}" if "wrist" in row else "")
-            print(f"[{k}/{len(jobs)}] {row['episode_id']} {row['camera']:<9} {rate}  {row['sec']}s"
+            print(f"[{k}/{len(jobs)}] {row['episode_id']} {row['hand']:<5} {row['camera']:<9} {rate}  {row['sec']}s"
                   f"{'  <- ' + row['error'] if row.get('error') else ''}", flush=True)
     print(f"끝. 오류 {n_err}개. 요약: {summ}")
 
