@@ -2,7 +2,7 @@
 
 시작·끝 박수 순간에 모든 카메라에서 손이 맞닿는 장면이어야 싱크가 맞는 것.
   python sync_check.py --raw ~/data/raw/2026-11-03 --id T1_E006 --sync ../../sync/sync.csv \
-      --out ~/out/seohyeon/sync_check --rot exo_front=180
+      --out ~/out/seohyeon/sync_check
 
 출력: <id>_start.png, <id>_end.png  (열 = 카메라, 행 = 기준 시각 -0.10 / 0 / +0.10 s. 가운데 줄이 박수)
 표준출력: 박수의 기준 시각이 카메라마다 얼마나 어긋나는지 (s0 + offset_start 이 모든 카메라에서 같아야 함)
@@ -17,7 +17,6 @@ import numpy as np
 from io_utils import find_episode_folder, find_video, read_frame_times
 
 REF = "exo_front"
-ROTS = {0: None, 90: 0, 180: 1, 270: 2}   # cv2.rotate 코드는 아래에서 변환
 
 
 def to_ref_time(t, row):
@@ -48,16 +47,13 @@ def nearest_frame(t_cam_all, row, t_ref):
     return i, float(r[i] - t_ref)
 
 
-def read_frame(video, idx, rot):
+def read_frame(video, idx):
     import cv2
     cap = cv2.VideoCapture(str(video))
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
     ok, img = cap.read()
     cap.release()
-    if not ok:
-        return None
-    code = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}.get(rot)
-    return cv2.rotate(img, code) if code is not None else img
+    return img if ok else None
 
 
 def main():
@@ -67,13 +63,11 @@ def main():
     ap.add_argument("--sync", required=True)
     ap.add_argument("--out", required=True, help="~/project 밖 경로")
     ap.add_argument("--cams", nargs="+", default=[REF, "exo_left", "exo_right", "ego"])
-    ap.add_argument("--rot", nargs="*", default=[], help="예: exo_front=180 (폰이 돌아간 채 저장된 카메라)")
     ap.add_argument("--steps", type=float, nargs="+", default=[-0.10, 0.0, 0.10], help="기준 시각 앞뒤 (s)")
     ap.add_argument("--width", type=int, default=480, help="칸 하나의 너비(px)")
     a = ap.parse_args()
 
     import cv2
-    rot = {k: int(v) for k, v in (s.split("=") for s in a.rot)}
     rows = load_rows(a.sync, a.id)
     if not rows:
         raise SystemExit(f"[중단] {a.sync} 에 {a.id} 의 usable=1 행이 없음")
@@ -110,7 +104,7 @@ def main():
             line = []
             for c in names:
                 i, err = nearest_frame(times[c], key(c), t_ref + step)
-                img = read_frame(videos[c], i, rot.get(c, 0))
+                img = read_frame(videos[c], i)
                 if img is None:
                     img = np.zeros((360, 480, 3), np.uint8)
                 h = int(img.shape[0] * a.width / img.shape[1])
