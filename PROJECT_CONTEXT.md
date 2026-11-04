@@ -2,7 +2,7 @@
 
 > 이 문서는 팀원과 코드 어시스턴트(VS Code 등)가 프로젝트 맥락을 한 번에 파악하기 위한 요약입니다.
 > 연구 목적·평가 방법의 기준은 멘토 제공 「학생 안내서」와 「역할 가이드」입니다. 이 문서와 어긋나면 그쪽을 따릅니다.
-> 최종 갱신: 2026-10-16
+> 최종 갱신: 2026-11-04
 
 ---
 
@@ -63,24 +63,27 @@ exit
 
 - 경북대 종합설계프로젝트 × ㈜크라우드웍스 산학협력 (멘토: 오진성 책임연구원)
 - 팀원: 정구현(팀장), 차서현, 신서연, 제효정 — 컴퓨터학부 4학년
-- 주제: 사람의 ego/exo 영상 → 손목 궤적 추출 → **리타게팅 알고리즘 4종을 같은 데이터로 비교** → 대표 알고리즘 데이터로 OpenVLA LoRA 1회 학습(파이프라인 실증)
+- 주제: 사람의 ego/exo 영상 → 손목 궤적 추출 → **리타게팅 알고리즘 3종을 같은 데이터로 비교** → 대표 알고리즘 데이터로 OpenVLA LoRA 1회 학습(파이프라인 실증)
 
 ### 전체 흐름
 ```
 수집(ego·exo 촬영) → 가공(키포인트·행동 라벨) → 싱크 확인(지난 학기 검출 알고리즘 재사용)
-→ 리타게팅(A·B·C·D) ─┬→ [연구 본체] MuJoCo 재생·지표 측정 → 알고리즘 × 케이스 비교표
+→ 리타게팅(A·B·C) ───┬→ [연구 본체] MuJoCo 재생·지표 측정 → 알고리즘 × 케이스 비교표
                       └→ [보조] 대표 알고리즘 1개 → OpenVLA LoRA 학습 → MSE·CI-MSE 점검
 ```
 
 ### 비교 알고리즘
-| 축 | 알고리즘 | 방식 | 구현 |
-|---|---|---|---|
-| A | DLS IK | 반복, 관절 한계는 계산 후 자르기 | pinocchio 자체 구현 |
-| B | 제약 QP IK | 반복, 관절 한계를 QP 제약으로 | mink (MuJoCo 모델 사용) |
-| C | 닫힌 해 | 반복 없이 기하 공식으로 해 전부 계산 | IK-Geo (7자유도는 SEW 각, stereo-sew) |
-| D (조건부) | 병렬 시드 최적화 | 여러 시작점 동시 최적화 | PyRoki |
+| 축 | 알고리즘 | 방식 | 팔꿈치 반영 | 구현 |
+|---|---|---|---|---|
+| A | DLS IK | 자코비안 반복, 관절 한계는 계산 후 자르기 | 손목이 주 목표, 팔 회전각은 남는 자유도(영공간) 보조 목표 | pinocchio 자체 구현 |
+| B | 제약 QP IK | 반복, 관절 한계·속도를 QP 제약으로 | 손목·팔꿈치를 가중치 둔 여러 목표로 동시에 | mink (MuJoCo 모델 사용) |
+| C | 닫힌 해 | 반복 없이 기하 공식으로 해 전부 계산 | 관절 하나의 고정값을 1차원 탐색해 팔 회전각을 맞추고, 직전 프레임과 연속인 해 선택 | EAIK (C++ 기반 파이썬 패키지, URDF 자동 분해) |
 
-- 네 알고리즘 모두 **학습하지 않음**. 매 프레임 독립적으로 IK를 푸는 계산 절차.
+- 세 알고리즘 모두 **학습하지 않음**. 매 프레임 독립적으로 IK를 푸는 계산 절차.
+- **C는 IK-Geo → EAIK로 변경 (2026-11-04).** 오프라인 회의에서 멘토 의견: EAIK는 C++ 기반에 `pip`로 바로 쓰고, URDF(`robot/robot.urdf`)에서 구조를 자동 분해함. 내부는 IK-Geo와 같은 기하 부분문제라 "닫힌 해" 축의 의미는 같음
+  - EAIK는 7자유도를 관절 하나를 고정해 6자유도로 풀고, SEW 각을 직접 받지 않음 → 위의 1차원 탐색 래퍼(팔 회전각 맞추기)를 4번이 작성. 논문에는 "EAIK + 팔 회전각 1차원 탐색"으로 적음
+- **D(PyRoki, 병렬 시드 최적화)는 제외 (2026-11-04).**
+- 팔꿈치는 위치가 아니라 **팔 회전각**(어깨-손목 축 둘레 팔꿈치 방향)으로 맞춤. 사람·로봇 팔 길이가 달라 위치는 맞출 수 없고, 회전각은 길이와 무관함. 입력: 어깨·팔꿈치·손목 3D + 손 방향 (3번 키포인트에 모두 있음)
 - 학습되는 것은 OpenVLA 하나뿐이며, 알고리즘 순위 비교에 쓰지 않음.
 
 ### 평가 지표 (5-2, 학습 없이 재생 결과로 계산)
@@ -98,6 +101,7 @@ exit
 | 타깃 로봇 | **KUKA LBR iiwa14 (R820)**, 7자유도 single-arm, **그리퍼 없음** → TCP = 플랜지 (MJCF `attachment_site`) (2026-11-03 결정) |
 | 시뮬레이터 | **MuJoCo** (Isaac Sim 불가 판정, 4절 참고) |
 | 촬영 장비 | iPhone (멘토 추천 앱: NeRFCapture / Spectacular Rec / AR Recorder — 연속 녹화가 기본인 Spectacular Rec 우선 테스트) |
+| 비교 알고리즘 | A DLS / B mink / C **EAIK** (2026-11-04: C를 IK-Geo → EAIK, D PyRoki 제외) |
 | 학습 모델 | OpenVLA-7B + LoRA, 대표 알고리즘 1개 데이터로 1회 |
 | 코드 관리 | GitHub `2026-2-CDP1/project`, 브랜치 → PR → main |
 
@@ -274,7 +278,7 @@ git -C ~/project branch -D results/metrics-summary
 ### .gitignore (대용량은 깃에 올리지 않음)
 - 제외: 영상(`*.mp4`, `*.mov` 등), 키포인트·궤적(`*.npy`, `*.npz`), `*.tfrecord*`, 컨테이너(`*.sif`), `runs/` 안의 체크포인트·가중치(`*.pt`, `*.bin`, `*.safetensors`), `rlds/data/`, `sync/calib/`, `replay/videos/`
 - `runs/`의 학습 설정·로그 같은 작은 파일은 커밋 대상
-- 대용량 데이터의 공용 저장 위치는 촬영 단계 전에 결정 예정 (서버 `/abr/coss37/` 아래 레포와 같은 폴더 구조 후보)
+- 대용량 원본 데이터는 서버 `~/data/raw/`에 둠 (구조: `episodes/RAW_DATA.md`)
 
 ---
 
@@ -293,7 +297,7 @@ project/
 └── eval/        # 8번: 평가 결과
 ```
 - 에피소드 ID: `T{태스크번호}_E{세 자리}` (예: `T2_E017`)
-- 알고리즘 폴더명: `A_DLS`, `B_mink`, `C_ikgeo`, `D_pyroki`
+- 알고리즘 폴더명: `A_DLS`, `B_mink`, `C_eaik`
 
 ## 8. 공통 규칙 (역할 가이드)
 - 단위: 길이 m, 각도 rad, 시간 s
@@ -320,24 +324,23 @@ project/
 - [x] 로컬 ↔ GitHub 연결 확인 (정구현)
 - [x] 작업 흐름 확정: 노트북 브랜치 → PR → main / 서버는 main pull·실행 전용
 - [x] 서버 `~/project` 설정: `pull.ff only`, 팀원별 커밋 명령 `git c 본인이름` 등록, main 동기화 확인
-- [x] 원본 데이터 서버 정리 (2026-11-04): `~/data/raw/T{1,2,3}/{exo_front,exo_left,exo_right,ego}/T{n}_E001~E075` + 체커보드 `T{n}_check`, 원본 zip은 `~/data/staging/`
+- [x] 원본 데이터 서버 정리 (2026-11-04): `~/data/raw/T{1,2,3}/{exo_front,exo_left,exo_right,ego}/T{n}_E001~E075` + 체커보드 `T{n}_check` (원본 zip 내용과 대조 검증 후 zip 삭제, 원본 zip은 공유 드라이브에 있음) → `episodes/RAW_DATA.md`
 - [x] 2번 싱크·보정 (신서연, 2026-11-04): `sync/sync.csv` T1~T3 675행 모두 `usable=1` (검증 오차 최대 36 ms), `sync/exo_calib_T1~T3.json` (재투영 오차 평균 0.82~1.06 px) → `sync/README.md`
 
-### 다음 (1번 역할: 로봇·시뮬레이터 셋업)
-1. KUKA LBR iiwa14 (R820)의 URDF·MJCF 확보 (출처는 `robot/SOURCES.md`)
-   - MJCF는 MuJoCo Menagerie `kuka_iiwa_14`, URDF는 Drake 모델. iiwa7과 링크 길이가 다르니 섞이지 않게 주의
-   - 알고리즘 C는 SEW 각 방식(stereo-sew)으로 적용 → 4번 담당과 함께 확인
-2. 모델 확인 — 서버엔 모니터가 없으므로 `mujoco.viewer` 대신 **GPU 노드에서 오프스크린 렌더링(`MUJOCO_GL=egl`)으로 PNG 저장** 후 VS Code Remote-SSH 또는 scp로 확인
-3. TCP 정의 — 그리퍼를 쓰지 않아 **플랜지로 확정** (2026-11-03): MJCF `attachment_site` / URDF `iiwa_link_ee_kuka`
-4. `joint_limits.csv` — 두 파일 관절 한계 비교·일치
-5. FK 일치 검사 — 무작위 자세 200개, TCP 위치·방향 차이 ≤ 1e-6 → `fk_check.md`
-6. ~~`gripper.csv`~~ — 그리퍼를 쓰지 않아 필요 없음 (2026-11-03)
-7. 4번·5-1번 담당이 `robot/` 파일을 로드해 보는지 확인
+- [x] 1번 로봇 셋업: iiwa14 URDF·MJCF 확보, 관절 한계 일치, FK 일치(무작위 200자세, 오차 1e-15), TCP = 플랜지 → `robot/model_checks.md`
+- [x] 5-1 재생 함수 `replay(q_traj)` v1 형태 고정 → `replay/README.md`
+- [x] 비교 알고리즘 확정 (2026-11-04): A DLS / B mink / C EAIK, D 제외 (1절)
+
+### 다음
+1. **3번 에피소드:** 에피소드마다 시작·끝 프레임 라벨(`episodes/labeling_rules.md`) → `episodes/tools/process_episode.py`로 키포인트·3D 궤적 생성 (보정은 태스크별 `--calib sync/exo_calib_T{n}.json`). 아직 실제 데이터에 돌리지 않음
+2. **4번 리타게팅:** `retarget/common.py` (사람 좌표 → 로봇 베이스 좌표, 팔 길이 맞추기, 팔 회전각 계산 — 세 알고리즘 공용) → `A_DLS`, `B_mink`, `C_eaik` → `retarget/<알고리즘>/<에피소드ID>.npz`
+   - C: EAIK로 iiwa14 왕복 검사(무작위 관절각 → FK → IK → FK) 먼저. 공유 `robot` 환경 설치는 정구현에게 요청
+3. **5-2 지표:** `metrics/definitions.md` 멘토 확인 후 고정 → `metrics.py`, `summary.md`. 저크 Δt가 1/30으로 적혀 있으나 exo_front는 약 60 fps → 30 Hz로 맞출지 Δt를 고칠지 결정
+4. **6 RLDS 변환 · 7 OpenVLA LoRA 학습 · 8 평가:** 시작 전
 
 ### 보류·확인 필요
 - 멘토 쪽 소통 담당자 지정 후 미팅 일정
-- IK-Geo 파이썬 패키지 종류(ik-geo / EAIK) 멘토 확인
-- 대용량 데이터 공용 저장 위치
+- EAIK의 관절 고정 API와 고정할 관절·팔 회전각 맞추기 규칙 (4번, 멘토 확인)
 - 팀원별 `git c` 등록 이메일이 각자 GitHub 계정(Settings → Emails)에 등록돼 있는지 확인
 - (선택) 서버 관리자에게 GPU 노드 드라이버 535+ 업그레이드 가능 여부 문의 → 가능하면 Isaac Sim 재검토
 - (선택) 팀원별 SSH 공개키를 서버 `~/.ssh/authorized_keys`에 등록 → 비밀번호 없이 접속·VS Code Remote-SSH 편의
