@@ -264,6 +264,15 @@ def robot_kinematics(replayer, q):
 
 # ---------------------------------------------------------------- 에피소드 하나
 
+POS_ERR_KEYS = ("pos_err", "tcp_error")     # 정의서 1절 이름, 4번 save_result 이름 (2026-11-05)
+ROT_ERR_KEYS = ("rot_err", "rot_error")
+
+
+def first_key(res, keys):
+    """keys 중 res에 있는 첫 이름 (없으면 None)."""
+    return next((k for k in keys if k in res), None)
+
+
 def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human_sew=None,
                     has_obstacles=False, table=None):
     """에피소드 하나 x 알고리즘 하나의 지표 (정의서 2절).
@@ -280,7 +289,7 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     """
     q = np.asarray(res["q"], float)
     T = len(q)
-    shapes = {"time_ms": (T,), "elbow_used": (T,), "pos_err": (T,), "rot_err": (T,),
+    shapes = {"time_ms": (T,), "elbow_used": (T,), "pos_err": (T,), "rot_err": (T,), "tcp_error": (T,), "rot_error": (T,),
               "target_pos": (T, 3), "target_quat": (T, 4)}
     for key, shape in shapes.items():
         if key in res and np.shape(res[key]) != shape:
@@ -300,8 +309,10 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
         pe, re = tracking_errors(out["tcp_pos"], out["tcp_quat"], res["target_pos"], res["target_quat"])
         (fail, missing), err_src = retarget_fail_rate(pe, re, ok_lim), "재생"
     else:
-        pe = np.asarray(res["pos_err"], float) if "pos_err" in res else None
-        re = np.asarray(res["rot_err"], float) if "rot_err" in res else None
+        # 4번 오차 (목표가 npz에 없을 때만). 키 이름은 정의서의 pos_err/rot_err, 4번 save_result의 tcp_error/rot_error 둘 다 읽음
+        pk, rk = first_key(res, POS_ERR_KEYS), first_key(res, ROT_ERR_KEYS)
+        pe = np.asarray(res[pk], float) if pk else None
+        re = np.asarray(res[rk], float) if rk else None
         fail, missing = nan, nan
         err_src = "4번 보고값 (목표 없음 → 성공률 계산 안 함)" if pe is not None else "없음"
     # 추종 오차는 목표가 있는 프레임만 (NaN 제외). 전부 NaN이면 NaN
