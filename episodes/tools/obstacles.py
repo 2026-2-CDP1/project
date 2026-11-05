@@ -33,6 +33,8 @@ import argparse, json, math
 from pathlib import Path
 import numpy as np
 
+from io_utils import find_calib
+
 KEYWORDS = ["방해물", "장애물", "아크릴", "파티션"]
 EXTRA = ["T3_E074", "T3_E075"]     # 기록지 layout 이 "몸 바로 앞에서" 뿐이지만 아크릴 판 배치 (T3 몸 바로 앞)
 VIEWS = ["front", "left", "right"]
@@ -130,15 +132,12 @@ def cmd_frames(a):
 # ---------------------------------------------------------------- 2) 로컬: 클릭
 class Clicker:
     def __init__(self, a):
-        from multiview import load_calibs
         self.a, self.dir = a, Path(a.frames).expanduser()
         self.index = json.load(open(self.dir / "index.json"))
         self.ids = a.ids or sorted(self.index)
         self.out = Path(a.out).expanduser() if a.out else self.dir / "obstacles.json"
         self.data = json.load(open(self.out)) if self.out.exists() else {"frame": FRAME_NOTE, "episodes": {}}
         self.calibs = {}
-        for f in Path(a.calib_dir).expanduser().glob("exo_calib_T*.json"):
-            self.calibs[f.stem.split("_")[-1]] = (f.name, load_calibs(json.load(open(f)))[0])
         self.k = 0 if not a.start_from else self.ids.index(a.start_from)
         self.load()
 
@@ -155,10 +154,15 @@ class Clicker:
 
     def load_images(self):
         import cv2
+        from multiview import load_calibs
         info = self.index[self.eid]
         self.scale = info["scale"]
         self.imgs = {c: cv2.imread(str(self.dir / self.eid / f"s{self.shot}_{c}.jpg")) for c in VIEWS}
-        self.calib_name, self.cams = self.calibs[self.eid.split("_")[0]]
+        path = find_calib(self.a.calib_dir, self.eid)
+        self.calib_name = path.name
+        if path.name not in self.calibs:
+            self.calibs[path.name] = load_calibs(json.load(open(path)))[0]
+        self.cams = self.calibs[path.name]
 
     def save(self, obs):
         info = self.index[self.eid]
