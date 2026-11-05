@@ -7,7 +7,6 @@
 import argparse
 import csv
 import json
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -18,7 +17,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "metrics"))
 
-from replay.replay import DEFAULT_MODEL, Replayer  # noqa: E402
+from replay.replay import Replayer  # noqa: E402
 import metrics as M  # noqa: E402
 
 N = 100  # 합성 궤적 프레임 수
@@ -38,13 +37,20 @@ def check(name, how, got, want, tol=1e-9, rel=False):
     return ok
 
 
-def base_res(q):
-    T = len(q)
-    return {"q": q, "status": np.zeros(T, int), "pos_err": np.zeros(T)}
-
-
 def ts_of(T, fps):
     return np.arange(T) / fps
+
+
+def quat_z(deg):
+    a = np.deg2rad(deg) / 2
+    return np.array([np.cos(a), 0, 0, np.sin(a)])
+
+
+def quat_mul(a, b):
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return np.array([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                     w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2])
 
 
 def find_self_collision_pose(r, lo, hi):
@@ -55,14 +61,8 @@ def find_self_collision_pose(r, lo, hi):
         self_d, _ = M.contact_depths(r.replay(q)["contacts"], r.robot_bodies)
         idx = np.flatnonzero(self_d < 0)
         if len(idx):
-            return q[idx[0]], float(self_d[idx[0]])
+            return q[idx[0]]
     raise RuntimeError("자기 충돌 자세를 못 찾음")
-
-
-def replayer_with_box(center, half):
-    """robot.xml에 상자 하나를 더한 임시 모델 (환경 충돌 검증용, 원본 파일은 그대로)."""
-    return Replayer(env_boxes=[{"name": "env_test", "center": list(center), "size": [2 * half] * 3,
-                                "quat": [1, 0, 0, 0]}])
 
 
 def rotate_about(p, origin, axis, ang):
@@ -77,126 +77,140 @@ def main(out_dir):
     r = Replayer()
     home = r.q_full_home[r.arm_adr].copy()
     q_home = np.tile(home, (N, 1))
-    run = lambda res, **kw: M.episode_metrics(res, lo, hi, vmax, kw.pop("ts", ts_of(len(res["q"]), 30)), kw.pop("r", r), **kw)
 
-    check("속도 한계 읽기 (rad/s)", "robot.urdf joint1 velocity = 85°/s", vmax[0], np.deg2rad(85), tol=1e-9)
+    def res_of(q, targets=True):
+        """q를 그대로 재생한 TCP를 목표로 둔 npz 내용 (= 완벽하게 따라간 경우)."""
+        res = {"q": q}
+        if targets:
+            out = r.replay(q)
+            res["target_pos"], res["target_quat"] = out["tcp_pos"].copy(), out["tcp_quat"].copy()
+        return res
 
-    # 1. 관절 한계 위반율 (안전 확인)
+    def run(res, rr=None, ts=None, **kw):
+        return M.episode_metrics(res, lo, hi, vmax, ts if ts is not None else ts_of(len(res["q"]), 30), rr or r, **kw)
+
+    check("속도 한계 읽기 (rad/s)", "robot.urdf joint1 velocity = 85°/s", vmax[0], np.deg2rad(85))
+
+    # ---- 정확도: 리타게팅 성공률 (실패율로 저장)
+    check("쿼터니언 사이 각", "z축 10° 회전", float(M.quat_angle(quat_z(0), quat_z(10))[0]), np.deg2rad(10), tol=1e-9)
+    check("쿼터니언 부호", "q와 −q는 같은 방향", float(M.quat_angle(quat_z(30), -quat_z(30))[0]), 0.0, tol=1e-6)
+    m, info = run(res_of(q_home))
+    check("성공률: 완벽히 따라감", "목표 = 재생한 TCP → 실패율 0", m["retarget_fail_rate"], 0.0)
+    res = res_of(q_home)
+    res["target_pos"][:20] += [0.02, 0, 0]                                   # 20프레임 2 cm 벗어남
+    res["target_pos"][20:30] += [0.005, 0, 0]                                # 10프레임 5 mm (성공)
+    for t in range(30, 40):                                                  # 10프레임 방향 10° 벗어남
+        res["target_quat"][t] = quat_mul(res["target_quat"][t], quat_z(10))
+    for t in range(40, 50):                                                  # 10프레임 방향 3° (성공)
+        res["target_quat"][t] = quat_mul(res["target_quat"][t], quat_z(3))
+    m, _ = run(res)
+    check("성공률: 위치·방향 기준", "2 cm 20프레임 + 10° 10프레임 실패, 5 mm·3°는 성공 → 실패율 0.3", m["retarget_fail_rate"], 0.3)
+    check("위치 추종 오차 최대 (m)", "같은 궤적", m["track_pos_err_max_m"], 0.02, tol=1e-9)
+    check("방향 추종 오차 최대 (rad)", "같은 궤적", m["track_rot_err_max_rad"], np.deg2rad(10), tol=1e-6)
     q = q_home.copy()
-    q[:10, 0] = hi[0] + 0.1
-    check("관절 한계 위반율", "100프레임 중 10프레임에서 joint1 = 상한 + 0.1 rad", M.limit_violation_rate(q, lo, hi), 0.1)
+    q[:5, 0] = hi[0] + 0.05                                                  # 한계 밖이지만 목표는 그 자세 그대로
+    m, _ = run(res_of(q))
+    check("성공률: 한계 밖은 실패", "목표에는 맞았지만 관절 한계 밖 5프레임 → 실패율 0.05", m["retarget_fail_rate"], 0.05)
+    check("관절 한계 위반율 (안전 확인)", "같은 궤적", m["limit_violation_rate"], 0.05)
+    res = {"q": q_home, "pos_err": np.full(N, 0.003)}
+    m, info = run(res)
+    check("목표 없음", "npz에 목표가 없으면 성공률 NaN, 추종 오차는 4번 보고값", m["retarget_fail_rate"], float("nan"))
+    check("목표 없음 → 4번 pos_err", "pos_err 모두 3 mm", m["track_pos_err_mean_m"], 0.003)
+
+    # ---- 정확도: 팔 회전각 차이
     q = q_home.copy()
-    q[:10, 0] = hi[0] + 0.5e-6
-    check("관절 한계 위반율 (수치 오차)", "10프레임에서 상한 + 0.5e-6 rad (ε 1e-6 미만은 안 셈)",
-          M.limit_violation_rate(q, lo, hi), 0.0)
+    q[:, 2] = np.linspace(-0.5, 0.5, N)
+    S, E, W, _ = M.robot_kinematics(r, q)
+    m, info = run(res_of(q), human_sew=(S, E, W))
+    check("팔 회전각 차이 (같은 팔)", "사람 어깨·팔꿈치·손목 = 로봇 관절 2·4·6 위치", m["arm_angle_diff_rad"], 0.0)
+    E30 = np.array([rotate_about(E[t], S[t], W[t] - S[t], np.deg2rad(30)) for t in range(N)])
+    m, _ = run(res_of(q), human_sew=(S, E30, W))
+    check("팔 회전각 차이 (30° 돌림)", "사람 팔꿈치만 축 둘레로 30° 돌림", np.rad2deg(m["arm_angle_diff_rad"]), 30.0, tol=1e-6)
+    E30[:20] = np.nan
+    _, info = run(res_of(q), human_sew=(S, E30, W))
+    check("팔 회전각 (팔꿈치 NaN 20%)", "NaN 프레임은 빼고 계산, 쓴 프레임 비율 0.8", info["arm_angle_frames"], 0.8)
+    psi = M.sew_angle([0, 0, 0], [0.1, 0, -0.2], [0, 0, -0.5])
+    check("팔 회전각 (어깨–손목 수직)", "축이 아래 방향과 같으면 정의 안 됨 → NaN", float(psi[0]), float("nan"))
 
-    # 2. 관절 한계 근접률: 한계 0.5° 안 10프레임 + 한계 정확히 위 5프레임(A가 잘라낸 경우) + 2° 떨어진 20프레임(안 셈)
-    q = q_home.copy()
-    q[:10, 3] = hi[3] - np.deg2rad(0.5)
-    q[10:15, 1] = lo[1]
-    q[15:35, 5] = hi[5] - np.deg2rad(2.0)
-    check("관절 한계 근접률", "한계 0.5° 안 10 + 한계 위 5 + 2° 떨어짐 20 (안 셈)", M.limit_proximity_rate(q, lo, hi), 0.15)
-    check("home 자세 근접률", "home만 100프레임", M.limit_proximity_rate(q_home, lo, hi), 0.0)
+    # ---- 속도: 계산 시간
+    res = res_of(q_home)
+    res["time_ms"] = np.r_[500.0, np.full(89, 1.0), np.full(10, 50.0)]       # 첫 프레임 500 ms(준비)는 뺌
+    m, _ = run(res)
+    check("계산 시간 중앙값 (ms)", "첫 프레임 500 ms 제외, 89프레임 1 ms + 10프레임 50 ms", m["compute_ms_median"], 1.0)
+    check("계산 시간 95% (ms)", "같은 배열 (99프레임 중 상위 10개가 50 ms)", m["compute_ms_p95"], 50.0)
+    check("실시간 초과율", "33.3 ms 넘는 프레임 10 / 99", m["over_budget_rate"], 10 / 99)
+    check("time_ms 없음", "없으면 NaN", run(res_of(q_home))[0]["compute_ms_median"], float("nan"))
 
-    # 3. 자기 충돌률·최대 침투 깊이
-    q_col, depth = find_self_collision_pose(r, lo, hi)
-    q = q_home.copy()
-    q[40:60] = q_col
-    m, _ = run(base_res(q))
-    check("자기 충돌률", "자기 충돌 자세(무작위 seed 0)를 100프레임 중 20프레임", m["self_collision_rate"], 0.2)
-    check("최대 침투 깊이 (m)", "같은 궤적. 정답 = 그 자세 하나를 재생한 침투 깊이", m["max_penetration_m"], -depth)
-
-    # 4. IK 실패율
-    status = np.zeros(N, int)
-    status[:7] = 1
-    status[50:55] = 2
-    ik = M.ik_rates(status)
-    check("IK 실패율", "status 1이 7개, 2가 5개", ik["ik_failure_rate"], 0.12)
-    check("IK 미수렴 비율", "같은 배열", ik["ik_not_converged_rate"], 0.07)
-    check("IK 해 없음 비율", "같은 배열", ik["ik_no_solution_rate"], 0.05)
-
-    # 5. 저크: 7관절 모두 q = home + A·sin(ωt), 4주기. 정답 A·ω³/√2 (차분 근사라 1% 허용)
+    # ---- 궤적 품질: 저크
     A, f = 0.2, 0.5
     w = 2 * np.pi * f
     for fps, label in [(30.0, "30 fps"), (60.0, "60 fps → 30 Hz"), (59.97, "59.97 fps (본 촬영 T1·T3)")]:
         T = int(round(4 / f * fps))
         ts = ts_of(T, fps)
         q = home + A * np.sin(w * ts)[:, None] * np.ones(7)
-        j, k, dt = M.jerk_rms(q, ts)
+        j, k, _ = M.jerk_rms(q, ts)
         check(f"저크 RMS ({label})", f"7관절 q = home + {A}·sin(2π·{f}·t), 4주기, k={k}", j, A * w ** 3 / np.sqrt(2),
               tol=0.01, rel=True)
 
-    # 6. 속도 한계 초과율: joint1을 일정 속도로. 30 Hz 구간 수 기준
+    # ---- 궤적 품질: 속도 한계 초과율
     for fps in (30.0, 60.0):
-        T = int(fps * 3) + 1                                       # 3초
+        T = int(fps * 3) + 1
         ts = ts_of(T, fps)
         q = np.tile(home, (T, 1))
-        speed = np.where(ts < 1.0, 0.5 * vmax[0], 1.5 * vmax[0])  # 처음 1초는 한계의 절반, 나머지 2초는 1.5배
+        speed = np.where(ts < 1.0, 0.5 * vmax[0], 1.5 * vmax[0])
         q[:, 0] = np.concatenate([[0.0], np.cumsum(speed[:-1] * np.diff(ts))])
-        want = 2.0 / 3.0
-        check(f"속도 한계 초과율 ({fps:.0f} fps)", "joint1 처음 1초 한계 0.5배, 2초 1.5배", M.velocity_limit_exceed_rate(q, ts, vmax),
-              want, tol=0.02)
-    q = np.tile(home, (N, 1))
-    q[50:, 2] += 0.2                                               # 한 프레임에 0.2 rad 점프 (6 rad/s)
-    check("속도 한계 초과율 (점프 1번)", "joint3이 한 프레임에 0.2 rad 점프 → 99구간 중 1", M.velocity_limit_exceed_rate(q, ts_of(N, 30), vmax),
-          1 / 99, tol=1e-9)
-
-    # 7. 팔 회전각: 사람 = 로봇 → 0, 사람 팔꿈치를 어깨–손목 축 둘레로 30° 돌림 → 30°
+        check(f"속도 한계 초과율 ({fps:.0f} fps)", "joint1 처음 1초 한계 0.5배, 2초 1.5배",
+              M.velocity_limit_exceed_rate(q, ts, vmax), 2 / 3, tol=0.02)
     q = q_home.copy()
-    q[:, 2] = np.linspace(-0.5, 0.5, N)                            # joint3로 팔꿈치를 움직임
-    S, E, W, _ = M.robot_kinematics(r, q)
-    m, info = run(base_res(q), human_sew=(S, E, W))
-    check("팔 회전각 차이 (같은 팔)", "사람 어깨·팔꿈치·손목 = 로봇 관절 2·4·6 위치", m["arm_angle_diff_rad"], 0.0, tol=1e-9)
-    E30 = np.array([rotate_about(E[t], S[t], W[t] - S[t], np.deg2rad(30)) for t in range(N)])
-    m, info = run(base_res(q), human_sew=(S, E30, W))
-    check("팔 회전각 차이 (30° 돌림)", "사람 팔꿈치만 축 둘레로 30° 돌림", np.rad2deg(m["arm_angle_diff_rad"]), 30.0, tol=1e-6)
-    E30[:20] = np.nan
-    m, info = run(base_res(q), human_sew=(S, E30, W))
-    check("팔 회전각 (팔꿈치 NaN 20%)", "NaN 프레임은 빼고 계산, 쓴 프레임 비율 0.8", info["arm_angle_frames"], 0.8)
-    psi = M.sew_angle([0, 0, 0], [0.1, 0, -0.2], [0, 0, -0.5])
-    check("팔 회전각 (어깨–손목 수직)", "축이 아래 방향과 같으면 정의 안 됨 → NaN", float(psi[0]), float("nan"))
+    q[50:, 2] += 0.2
+    check("속도 한계 초과율 (점프 1번)", "joint3이 한 프레임에 0.2 rad 점프 → 99구간 중 1",
+          M.velocity_limit_exceed_rate(q, ts_of(N, 30), vmax), 1 / 99)
 
-    # 8. 최소 조작성: home은 양수, 관절 모두 0(팔을 위로 곧게 편 특이 자세)은 0
-    _, _, _, w_home = M.robot_kinematics(r, home[None])
+    # ---- 궤적 품질: 자기 충돌률
+    q = q_home.copy()
+    q[40:60] = find_self_collision_pose(r, lo, hi)
+    check("자기 충돌률", "자기 충돌 자세(무작위 seed 0)를 100프레임 중 20프레임", run(res_of(q))[0]["self_collision_rate"], 0.2)
+
+    # ---- 궤적 품질: 환경 충돌률 = ① 장애물 파고듦 or ② 테이블 위 영역에서 팔꿈치가 테이블 면 아래
+    f_sim = lambda p: np.array([0.1, -0.2, 0.3]) + 0.8 * np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]]) @ np.asarray(p)
+    P_table = np.array([[0.2, 0.1, -0.05], [0.2, 0.5, -0.05], [0.2, 0.1, 0.05]])   # 아래·영역 안 / 가장자리 밖 / 위
+    got = M.elbow_below_table(np.array([f_sim(p) for p in P_table]), M.table_frame_inverse(f_sim), 0.3)
+    check("팔꿈치–테이블 판정", "축척 0.8·회전 변환에서: 영역 안 아래 / 가장자리 밖 / 위 → 참·거짓·거짓",
+          float((got == [True, False, False]).all()), 1.0)
+    tcp_home = r.replay(home[None])["tcp_pos"][0]
+    rb = Replayer(env_boxes=[{"name": "env_obs1", "center": tcp_home.tolist(), "size": [0.1] * 3, "quat": [1, 0, 0, 0]}])
+    q = q_home.copy()
+    q[25:, 0] = home[0] - np.pi / 2                                          # 25프레임 home(상자에 닿음), 75프레임 돌림
+    _, E_home, _, _ = M.robot_kinematics(r, home[None])
+    _, E_rot, _, _ = M.robot_kinematics(r, q[-1:])
+    lift = lambda p: np.asarray(p, float) + [0, 0, E_home[0, 2] + 0.05]      # 테이블 면(z=0)이 로봇 좌표에서 팔꿈치보다 5 cm 위
+    edge = (E_home[0, 1] + E_rot[0, 1]) / 2                                  # 돌린 팔꿈치만 테이블 위 영역
+    m, _ = run(res_of(q), rr=rb, has_obstacles=True, table=(lift, edge))
+    check("환경: 장애물 부분", "home TCP에 상자, 25프레임", m["env_obstacle_rate"], 0.25)
+    check("환경: 팔꿈치–테이블 부분", "돌린 75프레임만 테이블 위 영역에서 면 아래", m["env_elbow_below_table_rate"], 0.75)
+    check("환경 충돌률 (둘 중 하나)", "25 + 75 프레임 → 1.0", m["env_collision_rate"], 1.0)
+    check("환경 접촉이 자기 충돌률에 안 섞임", "같은 궤적", m["self_collision_rate"], 0.0)
+    m, _ = run(res_of(q_home))
+    check("장애물·테이블 정보 없음", "없으면 0이 아니라 NaN", m["env_collision_rate"], float("nan"))
+
+    # ---- 참고: 한계 근접률, 파지점 거리, 최소 조작성
+    q = q_home.copy()
+    q[:10, 3] = hi[3] - np.deg2rad(0.5)
+    q[10:15, 1] = lo[1]
+    q[15:35, 5] = hi[5] - np.deg2rad(2.0)
+    check("관절 한계 근접률 (참고)", "한계 0.5° 안 10 + 한계값 5 + 2° 떨어짐 20 (안 셈)", M.limit_proximity_rate(q, lo, hi), 0.15)
+    g = 30
+    kp = np.zeros((N, 7, 3))
+    kp[g, 5], kp[g, 6] = tcp_home + [0.01, 0, 0], tcp_home - [0.01, 0, 0]
+    m, _ = run(res_of(q_home), g=g, p_human=M.human_grasp_point(kp, NAMES, g))
+    check("파지점 거리 (참고)", "엄지 끝·검지 끝 중점 = TCP", m["grasp_dist_m"], 0.0)
+    kp[g, 5] = np.nan
+    m, _ = run(res_of(q_home), g=g, p_human=M.human_grasp_point(kp, NAMES, g))
+    check("파지점 거리 (키포인트 NaN)", "NaN → 이 지표에서만 뺌", m["grasp_dist_m"], float("nan"))
     _, _, _, w_zero = M.robot_kinematics(r, np.zeros((1, 7)))
-    check("최소 조작성 (home > 0)", "home 자세", float(w_home[0] > 1e-3), 1.0)
     check("최소 조작성 (곧게 편 자세)", "관절 모두 0 = 특이 자세", float(w_zero[0]), 0.0, tol=1e-6)
 
-    # 9. 파지점 거리 (참고): 사람 파지점 = 로봇 TCP → 0
-    g = 30
-    tcp = r.replay(q_home)["tcp_pos"][g]
-    kp = np.zeros((N, 7, 3))
-    kp[g, 5] = tcp + [0.01, 0, 0]
-    kp[g, 6] = tcp - [0.01, 0, 0]
-    m, _ = run(base_res(q_home), g=g, p_human=M.human_grasp_point(kp, NAMES, g))
-    check("파지점 거리 (m)", "엄지 끝·검지 끝 중점 = TCP (항등 변환)", m["grasp_dist_m"], 0.0)
-    kp[g, 5] = np.nan
-    m, _ = run(base_res(q_home), g=g, p_human=M.human_grasp_point(kp, NAMES, g))
-    check("파지점 거리 (키포인트 NaN)", "파지 프레임 엄지 끝이 NaN → NaN, 이 지표에서만 뺌", m["grasp_dist_m"], float("nan"))
-
-    # 10. 환경 충돌률 (참고)
-    rb = replayer_with_box(tcp, 0.05)
-    q = q_home.copy()
-    q[25:, 0] = home[0] + np.pi / 2
-    m, _ = run(base_res(q), r=rb, has_env_scene=True)
-    check("환경 충돌률", "home TCP에 상자, 100프레임 중 25프레임이 home", m["env_collision_rate"], 0.25)
-    check("환경 충돌이 자기 충돌률에 안 섞임", "같은 궤적", m["self_collision_rate"], 0.0)
-    m, _ = run(base_res(q_home))
-    check("장면 없을 때 환경 충돌률", "테이블·장애물 장면이 없으면 0이 아니라 NaN", m["env_collision_rate"], float("nan"))
-
-    # 11. 참고: 방향 오차·계산 시간
-    res = base_res(q_home)
-    res["rot_err"] = np.full(N, 0.02)
-    res["time_ms"] = np.r_[np.full(90, 1.0), np.full(10, 50.0)]
-    m, info = run(res)
-    check("방향 추종 오차 평균 (rad)", "rot_err 모두 0.02", m["track_rot_err_mean_rad"], 0.02)
-    check("계산 시간 중앙값 (ms)", "90프레임 1 ms, 10프레임 50 ms", m["compute_ms_median"], 1.0)
-    check("계산 시간 95% (ms)", "같은 배열", info["compute_ms_p95"], 50.0)
-    check("npz에 rot_err·time_ms 없음", "없으면 NaN", run(base_res(q_home))[0]["compute_ms_median"], float("nan"))
-
-    # 12. 실행 경로
-    check("전체 실행 (run)", "가짜 4번·3번 폴더 → metrics_long.csv, 60 fps 에피소드 하나", run_end_to_end(r, home), 1)
-
+    check("전체 실행 (run)", "가짜 4번·3번 폴더 + obstacles.json + 테이블 가장자리 → metrics_long.csv", run_end_to_end(r, home), 1)
     write_report(out_dir)
     return all(ok for *_, ok in RESULTS)
 
@@ -209,11 +223,12 @@ def run_end_to_end(r, home):
     ep = root / "eps" / "T1_E999"
     ep.mkdir(parents=True)
     q = np.tile(home, (T, 1))
-    np.savez(root / "ret" / "A_test" / "T1_E999.npz", q=q, status=np.zeros(T, int), pos_err=np.full(T, 0.01),
-             rot_err=np.full(T, 0.02), time_ms=np.full(T, 3.0))
+    out = r.replay(q)
+    np.savez(root / "ret" / "A_test" / "T1_E999.npz", q=q, target_pos=out["tcp_pos"], target_quat=out["tcp_quat"],
+             time_ms=np.full(T, 3.0))
     S, E, W, _ = M.robot_kinematics(r, q)
     kp = np.zeros((T, 7, 3))
-    kp[:, 0], kp[:, 1], kp[:, 2] = S, E, W                        # 사람 팔 = 로봇 팔 → 팔 회전각 차이 0
+    kp[:, 0], kp[:, 1], kp[:, 2] = S, E, W
     np.save(ep / "keypoints.npy", kp)
     (ep / "keypoint_names.json").write_text(json.dumps(NAMES))
     (ep / "meta.json").write_text(json.dumps({"task": "컵 잡기", "case_tags": ["큰 이동", "가장자리"],
@@ -222,18 +237,19 @@ def run_end_to_end(r, home):
                                                "grasp_frame": start + 50}))
     with open(ep / "exo_ts.csv", "w", newline="") as f:
         f.write("t_s\n" + "\n".join(f"{t:.6f}" for t in 1000 + np.arange(T) / fps) + "\n")
-    out = root / "out"
-    a = argparse.Namespace(retarget=root / "ret", episodes=root / "eps", sync=None, out=out, algos=None,
-                           ids=None, env_scene=False, identity_transform=True)
+    obs = root / "obstacles.json"
+    obs.write_text(json.dumps({"frame": "test", "episodes": {"T3_E001": {"obstacles": []}}}))   # 이 에피소드는 장애물 없음
+    a = argparse.Namespace(retarget=root / "ret", episodes=root / "eps", sync=None, out=root / "out", algos=None,
+                           ids=None, obstacles=obs, table_edge_y=1.0, identity_transform=True)
     M.run(a)
-    with open(out / "metrics_long.csv", encoding="utf-8") as f:
+    with open(root / "out" / "metrics_long.csv", encoding="utf-8") as f:
         rows = {row["metric"]: row for row in csv.DictReader(f)}
-    with open(out / "episode_info.csv", encoding="utf-8") as f:
+    with open(root / "out" / "episode_info.csv", encoding="utf-8") as f:
         info = list(csv.DictReader(f))
+    v = lambda k: float(rows[k]["value"])
     ok = (len(rows) == len(M.METRICS) and info[0]["status"] == "ok" and info[0]["resample_k"] == "2"
-          and rows["ik_failure_rate"]["case_tags"] == "큰 이동|가장자리"
-          and abs(float(rows["arm_angle_diff_rad"]["value"])) < 1e-9
-          and float(rows["compute_ms_median"]["value"]) == 3.0)
+          and rows["jerk_rms"]["case_tags"] == "큰 이동|가장자리" and v("retarget_fail_rate") == 0.0
+          and abs(v("arm_angle_diff_rad")) < 1e-9 and v("compute_ms_median") == 3.0 and v("env_collision_rate") == 0.0)
     return 1 if ok else 0
 
 
@@ -241,16 +257,16 @@ def write_report(out_dir):
     out_dir = Path(out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     n_ok = sum(ok for *_, ok in RESULTS)
-    lines = ["# 지표 코드 합성 데이터 검증 결과 (정의서 v0.3)", "",
+    lines = ["# 지표 코드 합성 데이터 검증 결과 (정의서 v0.4)", "",
              f"`python metrics/selftest.py` — {n_ok}/{len(RESULTS)} 통과", "",
              "| 검사 | 만드는 법 | 결과 | 정답 | 판정 |", "|---|---|---|---|---|"]
     fmt = (lambda v: f"{v:.6g}" if isinstance(v, (float, np.floating)) else str(v))
     for name, how, got, want, ok in RESULTS:
         lines.append(f"| {name} | {how} | {fmt(got)} | {fmt(want)} | {'통과' if ok else '**실패**'} |")
     lines += ["", "- 저크는 3차 차분이 미분의 근사이고 양 끝 3프레임이 빠져서 해석해보다 1% 미만 작게 나온다 (허용 1%).",
-              "- 60 fps·59.97 fps 궤적이 30 fps와 같은 값을 내면 30 Hz로 맞추는 처리(정의서 2.6·2.7)가 맞게 동작한 것이다.",
+              "- 60 fps·59.97 fps 궤적이 30 fps와 같은 값을 내면 30 Hz로 맞추는 처리(정의서 2.4·2.5)가 맞게 동작한 것이다.",
               "- 속도 초과율은 30 Hz 구간 경계가 1초에 딱 맞지 않아 2% 안에서 비교했다.",
-              "- 환경 충돌은 원본 모델에 상자 하나를 더한 장면(replay/scene.py와 같은 방식)으로 확인했다."]
+              "- 장애물은 원본 모델에 상자 하나를 더한 장면(replay/scene.py와 같은 방식), 테이블 면은 평행 이동·축척·회전 변환으로 확인했다."]
     (out_dir / "selftest.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\n{n_ok}/{len(RESULTS)} 통과 → {out_dir / 'selftest.md'}")
 
