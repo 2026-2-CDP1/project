@@ -134,7 +134,7 @@ t_ref = t + off0 + (off1 - off0) · (t - s0) / (s1 - s0)
 | `exo_*/<ID>_<hand>.npy` | `(Tc, 7, 2)` float | 픽셀 좌표 (u, v), 못 찾으면 NaN. 키포인트 순서는 아래 `EXO_NAMES` |
 | `ego/<ID>_<hand>.npy` | `(Tc,)` float | 엄지끝-검지끝 거리. MediaPipe world landmark 기준 (약 m 단위), 못 찾으면 NaN |
 
-- `Tc`는 그 카메라 영상의 프레임 수예요. exo_front는 약 60 fps, 나머지는 약 30 fps예요.
+- `Tc`는 그 카메라 영상의 프레임 수예요. exo_front는 T1·T3 약 60 fps, T2 30 fps이고 나머지는 약 30 fps예요.
 - 영상이 `data.jsonl` 프레임 줄보다 1프레임 많을 수 있어요(T1 30개). `io_utils.match_frames`가 마지막 프레임을 버려 맞춰요.
 
 **`EXO_NAMES`** (`extractors.py`, `keypoint_names.json`과 같음)
