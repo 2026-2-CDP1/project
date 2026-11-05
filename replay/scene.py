@@ -23,6 +23,7 @@
 import argparse
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -31,7 +32,15 @@ import numpy as np
 REPO = Path(__file__).resolve().parent.parent
 CONFIG = Path(__file__).resolve().parent / "scene_config.json"
 # replay/ 안에서 실행하면 "replay"가 폴더 대신 replay.py로 잡히므로, 스크립트 폴더를 빼고 레포 루트를 넣는다
-sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != Path(__file__).resolve().parent]
+def _is_here(p, here=Path(__file__).resolve().parent):
+    """같은 폴더인지 (한글 경로가 NFC/NFD로 다르게 들어와도 같게 보도록 문자열 대신 samefile로)."""
+    try:
+        return os.path.samefile(p or ".", here)
+    except OSError:
+        return False
+
+
+sys.path[:] = [p for p in sys.path if not _is_here(p)]
 sys.path.insert(0, str(REPO))
 
 
