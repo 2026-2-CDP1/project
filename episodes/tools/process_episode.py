@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--mirrored", action="store_true", help="입력 영상이 좌우 반전된 경우")
     ap.add_argument("--cache", help="extract_all.py 의 --out (있는 카메라는 영상 대신 이걸 읽음)")
     ap.add_argument("--notes", default="")
+    ap.add_argument("--link-video", action="store_true", help="영상을 복사하지 않고 원본에 심볼릭 링크 (시험용, 용량 절약)")
     a = ap.parse_args()
 
     tags = [s.strip() for s in a.tags.replace("|", ",").split(",") if s.strip()]
@@ -128,10 +129,18 @@ def main():
     json.dump(ex.EXO_NAMES, open(out / "keypoint_names.json", "w"), ensure_ascii=False)
     np.savetxt(out / "exo_ts.csv", t_ref, header="t_s", comments="", fmt="%.6f")
     np.savetxt(out / "ego_ts.csv", t_ego, header="t_s", comments="", fmt="%.6f")
-    v = find_video(folder[ref]); shutil.copy2(v, out / f"exo{v.suffix}")      # 기준 카메라 = exo
+    def put_video(key, name):
+        v, dst = find_video(folder[key]), out / name
+        if a.link_video:
+            dst = dst.with_suffix(v.suffix)
+            dst.unlink(missing_ok=True)
+            dst.symlink_to(v.resolve())
+        else:
+            shutil.copy2(v, dst.with_suffix(v.suffix))
+    put_video(ref, "exo")                                                     # 기준 카메라 = exo
     for c in names[1:]:
-        v = find_video(folder[c]); shutil.copy2(v, out / f"exo_{c}{v.suffix}")
-    v = find_video(folder["ego"]); shutil.copy2(v, out / f"ego{v.suffix}")
+        put_video(c, f"exo_{c}")
+    put_video("ego", "ego")
     json.dump({**report, **tri_report(tri_err, n_views, tri_st["min_views"]),
                "names": ex.EXO_NAMES, "settings": st, "triangulation": tri_st,
                "pinch_missing": float(np.isnan(pinch).mean())},
