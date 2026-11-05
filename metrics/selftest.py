@@ -117,6 +117,9 @@ def main(out_dir):
     m, info = run(res)
     check("목표 없음", "npz에 목표가 없으면 성공률 NaN, 추종 오차는 4번 보고값", m["retarget_fail_rate"], float("nan"))
     check("목표 없음 → 4번 pos_err", "pos_err 모두 3 mm", m["track_pos_err_mean_m"], 0.003)
+    m, info = run({"q": q_home, "tcp_error": np.full(N, 0.004), "rot_error": np.full(N, 0.01)})
+    check("목표 없음 → 4번 tcp_error", "4번 save_result 이름 tcp_error 모두 4 mm", m["track_pos_err_mean_m"], 0.004)
+    check("목표 없음 → 4번 rot_error", "4번 save_result 이름 rot_error 모두 0.01 rad", m["track_rot_err_mean_rad"], 0.01)
     res = res_of(q_home)
     res["target_pos"][:10] = np.nan                                         # 손목 미검출 10프레임 (4번: 목표 NaN)
     res["target_quat"][:10] = np.nan
