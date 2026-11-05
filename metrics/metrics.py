@@ -198,16 +198,23 @@ def table_frame_inverse(to_robot):
 
 
 def inside_table(P_table, outline):
-    """테이블 좌표 점들이 테이블 윗면 윤곽 타원 안(테이블 위 영역)인지 (T,). outline = table_outline.json 항목."""
-    a = np.radians(outline["angle_deg"])
-    axes = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
-    q = (np.atleast_2d(P_table)[:, :2] - np.asarray(outline["center"])) @ axes
-    r = np.asarray(outline["radii"])
-    return (q[:, 0] / r[0]) ** 2 + (q[:, 1] / r[1]) ** 2 <= 1.0
+    """테이블 좌표 점들이 테이블 윗면 윤곽 다각형 안(테이블 위 영역)인지 (T,). outline = table_outline.json 항목.
+
+    짝홀 규칙(점에서 +x로 뻗은 반직선이 변을 몇 번 지나는가).
+    """
+    V = np.asarray(outline["polygon"], float)
+    P = np.atleast_2d(P_table)[:, :2]
+    x, y = P[:, 0][:, None], P[:, 1][:, None]
+    x1, y1 = V[:, 0][None, :], V[:, 1][None, :]
+    x2, y2 = np.roll(V[:, 0], -1)[None, :], np.roll(V[:, 1], -1)[None, :]
+    straddle = (y1 > y) != (y2 > y)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        xc = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+    return ((straddle & (x < xc)).sum(axis=1) % 2) == 1
 
 
 def elbow_below_table(E_robot, to_table, outline):
-    """2.6② 로봇 팔꿈치(관절 4 중심)가 테이블 위 영역(윤곽 타원 안)에서 테이블 면(z = 0)보다 아래인지 (T,)."""
+    """2.6② 로봇 팔꿈치(관절 4 중심)가 테이블 위 영역(윤곽 다각형 안)에서 테이블 면(z = 0)보다 아래인지 (T,)."""
     P = to_table(E_robot)
     return (P[:, 2] < 0.0) & inside_table(P, outline)
 
@@ -261,7 +268,7 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     g, p_human     파지 프레임 인덱스, 로봇 좌표 사람 파지점. 없으면 파지점 거리 NaN
     human_sew      로봇 좌표로 옮긴 사람 (어깨, 팔꿈치, 손목) 각 (T,3). 없으면 팔 회전각 차이 NaN
     has_obstacles  장애물 정보를 확인했는지 (obstacles.json을 읽음). 거짓이면 장애물 부분 NaN
-    table          (to_robot_point, 테이블 윤곽 타원 dict). 없으면 팔꿈치–테이블 부분 NaN
+    table          (to_robot_point, 테이블 윤곽 다각형 dict). 없으면 팔꿈치–테이블 부분 NaN
     반환: (지표 dict, 정보 dict)
     """
     q = np.asarray(res["q"], float)
@@ -501,7 +508,7 @@ if __name__ == "__main__":
     r.add_argument("--sync", default=str(REPO / "sync" / "sync.csv"), help="usable=0 에피소드 제외용")
     r.add_argument("--obstacles", help="3번 obstacles.json (환경 충돌률의 장애물 부분)")
     r.add_argument("--table-outline", default=str(TABLE_OUTLINE),
-                   help="태스크별 테이블 윗면 윤곽 타원 (환경 충돌률의 팔꿈치–테이블 부분, metrics/table_outline.py로 구함)")
+                   help="태스크별 테이블 윗면 윤곽 다각형 (환경 충돌률의 팔꿈치–테이블 부분, metrics/table_outline.py로 구함)")
     r.add_argument("--out", required=True, help="출력 폴더 (~/project 밖, 예: ~/out/신서연/metrics)")
     r.add_argument("--algos", nargs="*", help="계산할 알고리즘 폴더 이름 (기본: --retarget 아래 있는 것 모두)")
     r.add_argument("--ids", nargs="*", help="이 에피소드만 (시험용)")
