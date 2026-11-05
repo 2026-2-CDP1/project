@@ -151,6 +151,14 @@ def main(out_dir):
     check("계산 시간 95% (ms)", "같은 배열 (99프레임 중 상위 10개가 50 ms)", m["compute_ms_p95"], 50.0)
     check("실시간 초과율", "33.3 ms 넘는 프레임 10 / 99", m["over_budget_rate"], 10 / 99)
     check("time_ms 없음", "없으면 NaN", run(res_of(q_home))[0]["compute_ms_median"], float("nan"))
+    res = res_of(q_home)
+    res["time_ms"] = np.r_[np.full(10, np.nan), 500.0, np.full(79, 2.0), np.full(10, 40.0)]   # 목표 없는 10프레임 = NaN
+    res["elbow_used"] = np.r_[np.zeros(30, bool), np.ones(70, bool)]
+    m, info = run(res)
+    check("계산 시간 (NaN 프레임)", "NaN 10 빼고, 남은 첫 프레임 500 ms 빼고 → 중앙값 2 ms", m["compute_ms_median"], 2.0)
+    check("실시간 초과율 (NaN 프레임)", "40 ms 10 / 남은 89프레임", m["over_budget_rate"], 10 / 89)
+    check("계산 시간 NaN 비율", "episode_info에 0.1", info["time_missing_rate"], 0.1)
+    check("팔꿈치 사용 비율", "elbow_used 70/100 → episode_info에 0.7", info["elbow_used_rate"], 0.7)
 
     # ---- 궤적 품질: 저크
     A, f = 0.2, 0.5
@@ -291,7 +299,7 @@ def write_report(out_dir):
     out_dir = Path(out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     n_ok = sum(ok for *_, ok in RESULTS)
-    lines = ["# 지표 코드 합성 데이터 검증 결과 (정의서 v0.4)", "",
+    lines = ["# 지표 코드 합성 데이터 검증 결과 (정의서 v1.0)", "",
              f"`python metrics/selftest.py` — {n_ok}/{len(RESULTS)} 통과", "",
              "| 검사 | 만드는 법 | 결과 | 정답 | 판정 |", "|---|---|---|---|---|"]
     fmt = (lambda v: f"{v:.6g}" if isinstance(v, (float, np.floating)) else str(v))

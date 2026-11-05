@@ -1,6 +1,6 @@
 """5-2 지표 계산: 리타게팅 결과(관절 궤적)를 재생해 정의서의 지표를 계산한다.
 
-정의는 metrics/definitions.md(v0.4)가 기준이다. 이 코드와 정의서가 다르면 정의서를 따르고 코드를 고친다.
+정의는 metrics/definitions.md(v1.0 고정)가 기준이다. 이 코드와 정의서가 다르면 정의서를 따르고 코드를 고친다.
 모든 지표는 에피소드 하나 x 알고리즘 하나 단위이고, 낮을수록 좋다 (성공률은 실패율 = 1 − 성공률로 저장).
 
 GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/use_robot.sh 후 srun (--gres 없이) CPU 노드에서.
@@ -12,7 +12,8 @@ GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/
 
 폴더 구조 (각 담당 문서 기준):
     <retarget>/<알고리즘>/<에피소드ID>.npz    q (T,7), target_pos (T,3), target_quat (T,4 wxyz) (손목 미검출 = NaN),
-                                              time_ms (T,), info (JSON: 좌표 변환 값) [, pos_err, rot_err]   ← 4번
+                                              time_ms (T,, 목표 없음 = NaN), elbow_used (T,), info (JSON: 좌표 변환 값)
+                                              [, pos_err, rot_err]                                              ← 4번
     <episodes>/<에피소드ID>/                   keypoints.npy (T,7,3), keypoint_names.json, exo_ts.csv,
                                               meta.json, labels.json                                ← 3번
 """
@@ -137,11 +138,17 @@ def arm_angle_diff(psi_robot, psi_human):
 # ---------------------------------------------------------------- 속도
 
 def compute_time(time_ms, budget=BUDGET_MS):
-    """2.3 첫 프레임(준비 시간)을 뺀 계산 시간의 중앙값·95% 값 (ms)과 실시간 기준을 넘은 프레임 비율."""
-    t = np.asarray(time_ms, float)[1:]
+    """2.3 계산 시간의 중앙값·95% 값 (ms)과 실시간 기준(30 Hz, 33.3 ms)을 넘은 프레임 비율.
+
+    NaN = 목표가 없어 풀지 않은 프레임 → 뺀다. 남은 프레임 중 첫 프레임(준비 시간)도 뺀다.
+    반환 (중앙값, 95%, 초과율, NaN 비율).
+    """
+    t = np.asarray(time_ms, float)
+    missing = float(np.mean(~np.isfinite(t))) if len(t) else float("nan")
+    t = t[np.isfinite(t)][1:]
     if not len(t):
-        return float("nan"), float("nan"), float("nan")
-    return float(np.median(t)), float(np.percentile(t, 95)), float((t > budget).mean())
+        return float("nan"), float("nan"), float("nan"), missing
+    return float(np.median(t)), float(np.percentile(t, 95)), float((t > budget).mean()), missing
 
 
 # ---------------------------------------------------------------- 궤적 품질
@@ -273,7 +280,7 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     """
     q = np.asarray(res["q"], float)
     T = len(q)
-    shapes = {"time_ms": (T,), "pos_err": (T,), "rot_err": (T,),
+    shapes = {"time_ms": (T,), "elbow_used": (T,), "pos_err": (T,), "rot_err": (T,),
               "target_pos": (T, 3), "target_quat": (T, 4)}
     for key, shape in shapes.items():
         if key in res and np.shape(res[key]) != shape:
@@ -300,7 +307,7 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     # 추종 오차는 목표가 있는 프레임만 (NaN 제외). 전부 NaN이면 NaN
     stat = lambda x, f: float(f(x[np.isfinite(x)])) if x is not None and np.isfinite(x).any() else nan
 
-    ms_med, ms_p95, over = compute_time(res["time_ms"]) if "time_ms" in res else (nan, nan, nan)
+    ms_med, ms_p95, over, time_missing = compute_time(res["time_ms"]) if "time_ms" in res else (nan, nan, nan, nan)
 
     obstacle = obs_d < 0 if has_obstacles else None
     below = elbow_below_table(E, table_frame_inverse(table[0]), table[1]) if table else None
@@ -326,7 +333,9 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     info = {"frames": T, "resample_k": k, "dt_s": dt,
             "dt_flag": bool(np.isfinite(dt) and abs(dt * RESAMPLE_HZ - 1) > DT_TOL),
             "error_source": err_src, "target_missing_rate": missing, "grasp_note": "", "arm_angle_frames": nan,
-            "obstacles": has_obstacles, "table": table is not None}
+            "obstacles": has_obstacles, "table": table is not None, "time_missing_rate": time_missing,
+            # 4번이 사람 팔꿈치를 실제로 입력에 쓴 프레임 비율 (T4: 안 보이면 직전 팔꿈치 유지)
+            "elbow_used_rate": float(np.mean(np.asarray(res["elbow_used"], bool))) if "elbow_used" in res else nan}
     if human_sew is not None:
         m["arm_angle_diff_rad"], info["arm_angle_frames"] = arm_angle_diff(sew_angle(S, E, W), sew_angle(*human_sew))
     if g is None:
@@ -487,6 +496,7 @@ def run(a):
               ["algo", "episode_id", "task", "case_tags", "metric", "value"])
     write_csv(out_dir / "episode_info.csv", info_rows,
               ["algo", "episode_id", "status", "frames", "resample_k", "dt_s", "dt_flag", "error_source",
+               "target_missing_rate", "time_missing_rate", "elbow_used_rate",
                "grasp_note", "arm_angle_frames", "obstacles", "table"])
     n_ok = sum(r["status"] == "ok" for r in info_rows)
     print(f"알고리즘 {algos}, 계산 {n_ok}건, 제외·오류 {len(info_rows) - n_ok}건 → {out_dir}")
@@ -500,7 +510,7 @@ def write_csv(path, rows, fields):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="5-2 지표 계산 (metrics/definitions.md v0.4)")
+    ap = argparse.ArgumentParser(description="5-2 지표 계산 (metrics/definitions.md v1.0)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="전 에피소드 x 알고리즘 지표 → metrics_long.csv")
     r.add_argument("--retarget", required=True, help="4번 결과 폴더 (<알고리즘>/<에피소드ID>.npz)")
