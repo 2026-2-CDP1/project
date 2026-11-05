@@ -99,6 +99,27 @@ python replay/scene.py --check --out ~/out/본인이름/scene_check     # 합성
 
 ---
 
+## 나란히 보기 영상 (v1.4)
+
+사람 exo_front 영상 | 알고리즘별 로봇 재생을 가로로 붙인 mp4 (역할 가이드 5-1 5단계). worst 에피소드 확인(지표 정의서 5절)과 파지 프레임 확인(2.11)에 쓴다.
+
+```bash
+# 4번 결과가 있을 때 (서버 GPU 노드는 MUJOCO_GL=egl)
+python replay/side_by_side.py --episode <3번 결과>/T1_E004 --retarget <4번 결과> \
+    --out ~/out/신서연/videos/T1_E004.mp4 [--view both] [--png 100]
+# 4번 결과 전 확인용: 실제 exo 영상 + 가짜 궤적
+python replay/side_by_side.py --demo --video <exo_front data.mov> --task T3 --fps 59.97 --view both --out demo.mp4
+```
+
+- **로봇 카메라 = 사람 영상과 같은 시점:** exo_front 카메라(`sync/exo_calib_T{n}.json`)를 4번 `to_robot_point(p, info)`로 로봇 좌표에 옮긴다. 변환이 평행 이동·축척·회전이라 화면 구도가 같아진다
+- `--view both`: 아래 줄에 옆 시점 (팔꿈치가 테이블 아래로 가는지 보기 좋음)
+- 실패 프레임(정의서 2.1과 같은 판정: 위치 > 1 cm, 방향 > 5°, 한계 밖)은 빨간 테두리 + FAIL, 목표 없음은 NO TARGET, `grasp_frame`은 GRASP
+- 30 Hz로 맞춤 (60 fps는 2프레임마다 하나). 장애물 상자와 테이블(윤곽 크기의 판, 그림용)을 같이 그림
+- 속도: 13초 에피소드, 알고리즘 2개, 두 줄 화면이 노트북에서 약 10초
+- 영상은 레포에 넣지 않는다 (`~/out/신서연/videos/`)
+
+---
+
 ## 변경 기록
 
 | 날짜 | 버전 | 변경 |
@@ -106,4 +127,5 @@ python replay/scene.py --check --out ~/out/본인이름/scene_check     # 합성
 | 2026-10-16 | v1 | 함수 형태 고정, 기구학 재생 구현 (플랜지 TCP, 그리퍼 없음) |
 | 2026-10-16 | v1.1 | 충돌 제외 쌍을 원본 7쌍 → 2쌍 (`collision_exclude.md`), `meta`에 `collision_exclude` 추가. 함수 형태는 그대로 |
 | 2026-11-03 | v1.2 | 그리퍼를 쓰지 않기로 함 → TCP를 플랜지 `attachment_site`로 확정, 플랜지·그리퍼 경고 삭제. `gripper` 인자는 남기고 무시. 함수 형태는 그대로 |
+| 2026-11-05 | v1.4 | 나란히 보기 영상 `replay/side_by_side.py`. 그림용 카메라를 넣으려고 `Replayer(extra_worldbody=…)` 인자 추가. `replay()` 함수 형태·기본 동작은 그대로 (무작위 2000 자세 점검 결과 같음) |
 | 2026-11-05 | v1.3 | 환경 장면: `Replayer(env_boxes, env_exclude)` 추가, `meta`에 `env_bodies`·`env_exclude` 추가, `replay/scene.py`. `replay()` 함수 형태·기본 동작은 그대로 (무작위 2000 자세 점검 결과 같음) |

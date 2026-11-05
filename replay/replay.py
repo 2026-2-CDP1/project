@@ -35,7 +35,7 @@ def env_body_xml(box):
             f'<geom name="{box["name"]}" type="box" size="{f(s)}" rgba="0.55 0.75 1 0.5"/></body>')
 
 
-def load_model(model_path, exclude=COLLISION_EXCLUDE, env_boxes=(), env_exclude=()):
+def load_model(model_path, exclude=COLLISION_EXCLUDE, env_boxes=(), env_exclude=(), extra_worldbody=""):
     """robot.xml을 읽되 충돌 제외 쌍을 exclude로 바꿔 컴파일한다 (원본 파일은 건드리지 않음).
 
     env_boxes   환경 상자(테이블·장애물) 목록. 월드에 고정된 body로 넣는다 (env_body_xml 형식)
@@ -46,8 +46,9 @@ def load_model(model_path, exclude=COLLISION_EXCLUDE, env_boxes=(), env_exclude=
     xml = re.sub(r'<exclude body1="[^"]+" body2="[^"]+"\s*/>', "", xml)
     pairs = sorted(exclude) + sorted(env_exclude)
     rule = "".join(f'<exclude body1="{a}" body2="{b}"/>' for a, b in pairs)
-    if env_boxes:
-        xml = xml.replace("</worldbody>", "".join(env_body_xml(b) for b in env_boxes) + "</worldbody>", 1)
+    if env_boxes or extra_worldbody:
+        add = "".join(env_body_xml(b) for b in env_boxes) + extra_worldbody   # extra: 카메라 등 (영상용)
+        xml = xml.replace("</worldbody>", add + "</worldbody>", 1)
     if "<contact>" in xml:
         xml = xml.replace("<contact>", "<contact>" + rule, 1)
     else:
@@ -60,12 +61,13 @@ def load_model(model_path, exclude=COLLISION_EXCLUDE, env_boxes=(), env_exclude=
 class Replayer:
     """모델을 한 번 읽어 두고 궤적을 여러 번 재생한다."""
 
-    def __init__(self, model_path=DEFAULT_MODEL, env_boxes=(), env_exclude=()):
+    def __init__(self, model_path=DEFAULT_MODEL, env_boxes=(), env_exclude=(), extra_worldbody=""):
         """env_boxes가 있으면 테이블·장애물 장면을 같이 재생한다 (만드는 법: replay/scene.py)."""
         self.model_path = Path(model_path)
         self.env_boxes = [dict(b) for b in env_boxes]
         self.env_exclude = sorted(tuple(p) for p in env_exclude)
-        self.m = load_model(self.model_path, env_boxes=self.env_boxes, env_exclude=self.env_exclude)
+        self.m = load_model(self.model_path, env_boxes=self.env_boxes, env_exclude=self.env_exclude,
+                            extra_worldbody=extra_worldbody)   # extra_worldbody: 카메라 등 그림용 요소 (replay/side_by_side.py)
         self.collision_exclude = sorted(COLLISION_EXCLUDE)
         self.d = mujoco.MjData(self.m)
         self.arm_adr = np.array([self.m.jnt_qposadr[self.m.joint(n).id] for n in ARM_JOINTS])
