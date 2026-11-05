@@ -1,8 +1,9 @@
 {
-  "_note": "4번 리타게팅 설정 기록. 각 스크립트의 기본값과 같음 (인자 없이 실행 = 이 설정). 바꾸면 이유를 README 변경 기록에 적고 A·B·C 모두 다시 실행",
-  "version": "0.1 (잠정, 2026-11-05)",
+  "_note": "4번 리타게팅 설정. 결과를 보기 전에 고정 (공통 규칙). run_all.py 는 이 파일만 읽어 A·B·C에 같은 설정을 쓴다 (각 스크립트 기본값과도 같음). 바꾸면 이유를 README 변경 기록에 적고 A·B·C 모든 에피소드를 다시 실행",
+  "version": "1.1 고정 (2026-11-06)",
   "common": {
-    "scale": "arm",
+    "scale": "arm_global",
+    "_scale_note": "k = 0.82 m / 사람 팔 길이(위팔+아래팔). 사람 팔 길이 = 모든 에피소드(제외 목록 빼고) 에피소드별 중앙값의 중앙값 하나. human_arm_m 에 숫자를 넣으면 그 값으로 고정. 1.0 은 에피소드별(arm)",
     "anchor": "table",
     "mount": "up",
     "base_z": 0.0,
@@ -18,7 +19,7 @@
   "C_eaik": {"script": "eaik_ik.py", "select": "human", "lock_joint": 3, "grid_deg": 1.0, "refine_deg": 0.1,
              "sat_eps": 1e-3},
   "timing": {
-    "node": "전체 실행 때 기록 (sbatch -w)",
+    "node": "실행할 때 sbatch -w 로 고정. 실제 노드는 run_all.py 가 <out>/run_info_<작업번호>.json 에 기록",
     "slurm": "sbatch -p p02 -w <노드> -n 1 -c 1 --mem=4G",
     "threads": "OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1 (스크립트가 설정)",
     "measured": "프레임당 IK 호출 시간만 (모델 로드·파일 입출력 제외) -> npz time_ms"
