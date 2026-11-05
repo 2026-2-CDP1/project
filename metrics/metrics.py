@@ -11,8 +11,8 @@ GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/
     python metrics/selftest.py --out ~/out/신서연/metrics_selftest      # 합성 데이터 검증
 
 폴더 구조 (각 담당 문서 기준):
-    <retarget>/<알고리즘>/<에피소드ID>.npz    q (T,7), target_pos (T,3), target_quat (T,4 wxyz),
-                                              time_ms (T,) [, pos_err, rot_err]                     ← 4번
+    <retarget>/<알고리즘>/<에피소드ID>.npz    q (T,7), target_pos (T,3), target_quat (T,4 wxyz) (손목 미검출 = NaN),
+                                              time_ms (T,), info (JSON: 좌표 변환 값) [, pos_err, rot_err]   ← 4번
     <episodes>/<에피소드ID>/                   keypoints.npy (T,7,3), keypoint_names.json, exo_ts.csv,
                                               meta.json, labels.json                                ← 3번
 """
@@ -98,9 +98,15 @@ def tracking_errors(tcp_pos, tcp_quat, target_pos, target_quat):
 
 
 def retarget_fail_rate(pos_err, rot_err, ok_limits):
-    """2.1 성공 = 위치 ≤ 1 cm, 방향 ≤ 5°, 관절 한계 안. 실패율 = 1 − 성공 프레임 비율."""
-    success = (pos_err <= SUCCESS_POS_M) & (rot_err <= SUCCESS_ROT_RAD) & ok_limits
-    return float(1.0 - success.mean())
+    """2.1 성공 = 위치 ≤ 1 cm, 방향 ≤ 5°, 관절 한계 안. 실패율 = 1 − 성공 프레임 비율.
+
+    목표가 NaN인 프레임(손목 미검출)은 판정할 수 없어 분모에서 뺀다. 반환 (실패율, 목표 없는 프레임 비율).
+    """
+    valid = np.isfinite(pos_err) & np.isfinite(rot_err)
+    if not valid.any():
+        return float("nan"), 1.0
+    success = (pos_err[valid] <= SUCCESS_POS_M) & (rot_err[valid] <= SUCCESS_ROT_RAD) & ok_limits[valid]
+    return float(1.0 - success.mean()), float(1.0 - valid.mean())
 
 
 def sew_angle(S, E, W, down=(0.0, 0.0, -1.0)):
@@ -268,12 +274,14 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     # 정확도: 목표가 npz에 있으면 재생 결과로 직접 계산 (모든 알고리즘에 같은 계산)
     if "target_pos" in res and "target_quat" in res:
         pe, re = tracking_errors(out["tcp_pos"], out["tcp_quat"], res["target_pos"], res["target_quat"])
-        fail, err_src = retarget_fail_rate(pe, re, ok_lim), "재생"
+        (fail, missing), err_src = retarget_fail_rate(pe, re, ok_lim), "재생"
     else:
         pe = np.asarray(res["pos_err"], float) if "pos_err" in res else None
         re = np.asarray(res["rot_err"], float) if "rot_err" in res else None
-        fail, err_src = nan, "4번 보고값 (목표 없음 → 성공률 계산 안 함)" if pe is not None else "없음"
-    stat = lambda x, f: float(f(x)) if x is not None else nan
+        fail, missing = nan, nan
+        err_src = "4번 보고값 (목표 없음 → 성공률 계산 안 함)" if pe is not None else "없음"
+    # 추종 오차는 목표가 있는 프레임만 (NaN 제외). 전부 NaN이면 NaN
+    stat = lambda x, f: float(f(x[np.isfinite(x)])) if x is not None and np.isfinite(x).any() else nan
 
     ms_med, ms_p95, over = compute_time(res["time_ms"]) if "time_ms" in res else (nan, nan, nan)
 
@@ -300,7 +308,7 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     }
     info = {"frames": T, "resample_k": k, "dt_s": dt,
             "dt_flag": bool(np.isfinite(dt) and abs(dt * RESAMPLE_HZ - 1) > DT_TOL),
-            "error_source": err_src, "grasp_note": "", "arm_angle_frames": nan,
+            "error_source": err_src, "target_missing_rate": missing, "grasp_note": "", "arm_angle_frames": nan,
             "obstacles": has_obstacles, "table": table is not None}
     if human_sew is not None:
         m["arm_angle_diff_rad"], info["arm_angle_frames"] = arm_angle_diff(sew_angle(S, E, W), sew_angle(*human_sew))
@@ -338,11 +346,15 @@ def unusable_episodes(sync_csv):
     return bad
 
 
-def load_to_robot_point(identity):
-    """4번 retarget/common.py의 to_robot_point (테이블 좌표 → 로봇 베이스 좌표)."""
+def load_transform(identity):
+    """4번 retarget/common.py의 to_robot_point(p, info) (테이블 좌표 → 로봇 베이스 좌표).
+
+    변환 값(어깨 위치, 팔 길이 비율, 작업 손, 로봇 자리)은 에피소드마다 달라서 4번 npz의 info(JSON)에 들어 있고,
+    그 info를 함수에 같이 넘긴다 (4번 답 T9, 2026-11-05). 반환: f(p, info) → (3,)
+    """
     if identity:
         print("[주의] --identity-transform: 테이블 좌표를 로봇 좌표로 그대로 씀 (시험용, 실제 결과에 쓰지 말 것)")
-        return lambda p: np.asarray(p, float)
+        return lambda p, info: np.asarray(p, float)
     import sys
     sys.path.insert(0, str(REPO / "retarget"))
     try:
@@ -351,6 +363,19 @@ def load_to_robot_point(identity):
         raise SystemExit(f"retarget/common.py의 to_robot_point를 못 읽음 ({e}). "
                          "4번 코드가 들어오기 전 시험이면 --identity-transform") from None
     return to_robot_point
+
+
+def read_info(res, identity):
+    """npz의 info(JSON 문자열) → (dict, 비교용 문자열). 항등 변환 시험이면 없어도 됨."""
+    if "info" not in res:
+        if identity:
+            return {}, ""
+        raise ValueError("npz에 info(좌표 변환 값)가 없음 — 4번 save_result 확인")
+    raw = res["info"]
+    raw = raw.item() if hasattr(raw, "item") else raw
+    raw = raw.decode() if isinstance(raw, bytes) else str(raw)
+    info = json.loads(raw)
+    return info, json.dumps(info, sort_keys=True)
 
 
 def map_points(to_robot, P):
@@ -372,7 +397,7 @@ def run(a):
     out_dir.mkdir(parents=True, exist_ok=True)
     lo, hi, vmax = load_limits()
     base_replayer = Replayer()
-    to_robot = load_to_robot_point(a.identity_transform)
+    transform = load_transform(a.identity_transform)
     obstacles = load_obstacles(a.obstacles) if a.obstacles else None
     if a.table_edge_y is None:
         print("[주의] --table-edge-y가 없어 환경 충돌률의 팔꿈치–테이블 부분과 환경 충돌률은 NaN")
@@ -386,7 +411,8 @@ def run(a):
     if not algos:
         raise SystemExit(f"{ret_root} 아래에 npz가 든 알고리즘 폴더가 없음")
 
-    scenes = {}  # 에피소드마다 장애물 장면 (알고리즘끼리 같은 장면을 씀)
+    scenes = {}      # 에피소드마다 장애물 장면 (알고리즘끼리 같은 장면을 씀)
+    ep_info = {}     # 에피소드마다 좌표 변환 값. 같은 에피소드는 알고리즘끼리 같아야 함
     long_rows, info_rows = [], []
     for algo in algos:
         for npz in sorted((ret_root / algo).glob("*.npz")):
@@ -406,6 +432,10 @@ def run(a):
                 names = read_json(d / "keypoint_names.json")
                 if len(kp) != len(res["q"]):
                     raise ValueError(f"keypoints 길이 {len(kp)} ≠ 궤적 길이 {len(res['q'])}")
+                info, info_key = read_info(res, a.identity_transform)
+                if ep_info.setdefault(ep, info_key) != info_key:
+                    raise ValueError("같은 에피소드인데 알고리즘마다 npz info(좌표 변환 값)가 다름 — 4번 확인")
+                to_robot = lambda p, _info=info: np.asarray(transform(p, _info), float)
                 if obstacles is not None and ep not in scenes:
                     # 장애물 상자만 장면에 넣는다 (테이블은 상자가 아니라 면으로 따로 판정, 2.6②)
                     boxes = [map_box(f"env_{o.get('name') or f'obs{i}'}", box_corners(o["center"], o["size"], o["yaw_deg"]),

@@ -116,6 +116,17 @@ def main(out_dir):
     m, info = run(res)
     check("목표 없음", "npz에 목표가 없으면 성공률 NaN, 추종 오차는 4번 보고값", m["retarget_fail_rate"], float("nan"))
     check("목표 없음 → 4번 pos_err", "pos_err 모두 3 mm", m["track_pos_err_mean_m"], 0.003)
+    res = res_of(q_home)
+    res["target_pos"][:10] = np.nan                                         # 손목 미검출 10프레임 (4번: 목표 NaN)
+    res["target_quat"][:10] = np.nan
+    res["target_pos"][10:30] += [0.02, 0, 0]                                 # 20프레임 2 cm 벗어남
+    m, info = run(res)
+    check("성공률: 목표 NaN 프레임", "목표 NaN 10 + 2 cm 20 → NaN은 분모에서 빼서 실패율 20/90", m["retarget_fail_rate"], 20 / 90)
+    check("목표 없는 프레임 비율", "같은 궤적 → episode_info에 0.1", info["target_missing_rate"], 0.1)
+    check("추종 오차 (NaN 제외)", "평균 = 2 cm × 20 / 90", m["track_pos_err_mean_m"], 0.02 * 20 / 90, tol=1e-9)
+    res["target_pos"][:] = np.nan
+    res["target_quat"][:] = np.nan
+    check("목표 전부 NaN", "판정할 프레임이 없음 → NaN", run(res)[0]["retarget_fail_rate"], float("nan"))
 
     # ---- 정확도: 팔 회전각 차이
     q = q_home.copy()
@@ -210,47 +221,66 @@ def main(out_dir):
     _, _, _, w_zero = M.robot_kinematics(r, np.zeros((1, 7)))
     check("최소 조작성 (곧게 편 자세)", "관절 모두 0 = 특이 자세", float(w_zero[0]), 0.0, tol=1e-6)
 
-    check("전체 실행 (run)", "가짜 4번·3번 폴더 + obstacles.json + 테이블 가장자리 → metrics_long.csv", run_end_to_end(r, home), 1)
+    ok_run, ok_info = run_end_to_end(r, home)
+    check("전체 실행 (run)", "가짜 4번·3번 폴더 + obstacles.json + 테이블 가장자리 → metrics_long.csv", ok_run, 1)
+    check("npz info로 좌표 변환", "알고리즘 2개 같은 info → ok, info가 다른 에피소드 → 오류로 기록", ok_info, 1)
     write_report(out_dir)
     return all(ok for *_, ok in RESULTS)
 
 
 def run_end_to_end(r, home):
-    """폴더 구조·파일 형식을 그대로 흉내 내서 run()을 돌린다. (오류 0, 행 수·값이 맞으면 1)"""
+    """폴더 구조·파일 형식을 그대로 흉내 내서 run()을 돌린다. 반환 (실행 경로 ok, info 처리 ok) — 각각 1이면 통과.
+
+    좌표 변환은 4번 to_robot_point(p, info) 대신 "info의 offset만큼 옮기기"로 바꿔 끼운다.
+    알고리즘 2개 x 에피소드 2개. T1_E998만 알고리즘끼리 info를 다르게 줘서 오류로 기록되는지 본다.
+    """
     root = Path(tempfile.mkdtemp())
     T, fps, start = 120, 59.97, 95
-    (root / "ret" / "A_test").mkdir(parents=True)
-    ep = root / "eps" / "T1_E999"
-    ep.mkdir(parents=True)
+    off = np.array([0.0, 0.0, 0.1])
     q = np.tile(home, (T, 1))
     out = r.replay(q)
-    np.savez(root / "ret" / "A_test" / "T1_E999.npz", q=q, target_pos=out["tcp_pos"], target_quat=out["tcp_quat"],
-             time_ms=np.full(T, 3.0))
     S, E, W, _ = M.robot_kinematics(r, q)
     kp = np.zeros((T, 7, 3))
-    kp[:, 0], kp[:, 1], kp[:, 2] = S, E, W
-    np.save(ep / "keypoints.npy", kp)
-    (ep / "keypoint_names.json").write_text(json.dumps(NAMES))
-    (ep / "meta.json").write_text(json.dumps({"task": "컵 잡기", "case_tags": ["큰 이동", "가장자리"],
-                                             "exo_start_frame": start}, ensure_ascii=False))
-    (ep / "labels.json").write_text(json.dumps({"exo_start_frame": start, "exo_end_frame": start + T,
-                                               "grasp_frame": start + 50}))
-    with open(ep / "exo_ts.csv", "w", newline="") as f:
-        f.write("t_s\n" + "\n".join(f"{t:.6f}" for t in 1000 + np.arange(T) / fps) + "\n")
+    kp[:, 0], kp[:, 1], kp[:, 2] = S - off, E - off, W - off             # 테이블 좌표 = 로봇 좌표 − offset
+    for eid in ("T1_E998", "T1_E999"):
+        ep = root / "eps" / eid
+        ep.mkdir(parents=True)
+        np.save(ep / "keypoints.npy", kp)
+        (ep / "keypoint_names.json").write_text(json.dumps(NAMES))
+        (ep / "meta.json").write_text(json.dumps({"task": "컵 잡기", "case_tags": ["큰 이동", "가장자리"],
+                                                 "exo_start_frame": start}, ensure_ascii=False))
+        (ep / "labels.json").write_text(json.dumps({"exo_start_frame": start, "exo_end_frame": start + T,
+                                                   "grasp_frame": start + 50}))
+        with open(ep / "exo_ts.csv", "w", newline="") as f:
+            f.write("t_s\n" + "\n".join(f"{t:.6f}" for t in 1000 + np.arange(T) / fps) + "\n")
+        for algo in ("A_test", "B_test"):
+            (root / "ret" / algo).mkdir(parents=True, exist_ok=True)
+            o = off if not (eid == "T1_E998" and algo == "B_test") else off * 2   # E998은 B만 info가 다름
+            np.savez(root / "ret" / algo / f"{eid}.npz", q=q, target_pos=out["tcp_pos"], target_quat=out["tcp_quat"],
+                     time_ms=np.full(T, 3.0), info=json.dumps({"offset": o.tolist()}))
     obs = root / "obstacles.json"
-    obs.write_text(json.dumps({"frame": "test", "episodes": {"T3_E001": {"obstacles": []}}}))   # 이 에피소드는 장애물 없음
+    obs.write_text(json.dumps({"frame": "test", "episodes": {"T3_E001": {"obstacles": []}}}))   # 이 에피소드들은 장애물 없음
     a = argparse.Namespace(retarget=root / "ret", episodes=root / "eps", sync=None, out=root / "out", algos=None,
-                           ids=None, obstacles=obs, table_edge_y=1.0, identity_transform=True)
-    M.run(a)
+                           ids=None, obstacles=obs, table_edge_y=1.0, identity_transform=False)
+    saved = M.load_transform
+    M.load_transform = lambda identity: (lambda p, info: np.asarray(p, float) + np.asarray(info["offset"]))
+    try:
+        M.run(a)
+    finally:
+        M.load_transform = saved
     with open(root / "out" / "metrics_long.csv", encoding="utf-8") as f:
-        rows = {row["metric"]: row for row in csv.DictReader(f)}
+        rows = [row for row in csv.DictReader(f)]
     with open(root / "out" / "episode_info.csv", encoding="utf-8") as f:
-        info = list(csv.DictReader(f))
-    v = lambda k: float(rows[k]["value"])
-    ok = (len(rows) == len(M.METRICS) and info[0]["status"] == "ok" and info[0]["resample_k"] == "2"
-          and rows["jerk_rms"]["case_tags"] == "큰 이동|가장자리" and v("retarget_fail_rate") == 0.0
-          and abs(v("arm_angle_diff_rad")) < 1e-9 and v("compute_ms_median") == 3.0 and v("env_collision_rate") == 0.0)
-    return 1 if ok else 0
+        info = {(row["algo"], row["episode_id"]): row for row in csv.DictReader(f)}
+    v = {row["metric"]: float(row["value"]) for row in rows if row["algo"] == "A_test" and row["episode_id"] == "T1_E999"}
+    ok_run = (len(v) == len(M.METRICS) and info[("A_test", "T1_E999")]["resample_k"] == "2"
+              and rows[0]["case_tags"] == "큰 이동|가장자리" and v["retarget_fail_rate"] == 0.0
+              and abs(v["arm_angle_diff_rad"]) < 1e-9 and v["compute_ms_median"] == 3.0 and v["env_collision_rate"] == 0.0)
+    status = {k: row["status"] for k, row in info.items()}
+    ok_info = (status[("A_test", "T1_E998")] == "ok" and status[("A_test", "T1_E999")] == "ok"
+               and status[("B_test", "T1_E999")] == "ok" and "info" in status[("B_test", "T1_E998")]
+               and status[("B_test", "T1_E998")].startswith("오류"))
+    return (1 if ok_run else 0), (1 if ok_info else 0)
 
 
 def write_report(out_dir):
