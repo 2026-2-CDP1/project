@@ -1,6 +1,8 @@
-"""sync.csv note 에 front 박수 프레임이 있는 에피소드를 박수 사이 구간으로 한꺼번에 처리한다 (시험용).
+"""에피소드를 한꺼번에 처리한다. --segments 를 주면 동작 구간, 없으면 박수 사이 (시험용).
 
-정식 --start/--end 는 labeling_rules.md 기준인데 아직 없어서, 시작 박수 ~ 끝 박수를 임시 구간으로 쓴다.
+--segments (seg_click.py merge 의 표): 그 구간으로 처리한 뒤, 손목 값이 TRIM_S 초 연속으로 있는
+첫 프레임 ~ 마지막 프레임으로 다시 잘라 처리한다 (리타게팅 담당과 합의한 규칙, 프레임 수는 fps 로 바꿈).
+없으면 sync.csv note 의 시작 박수 ~ 끝 박수를 임시 구간으로 쓴다.
 손, 작업자, 태그, 용도는 records.csv, 보정 파일은 io_utils.find_calib, 2D 는 extract_all.py 캐시에서 읽는다.
 예비(E066~) 의 split 은 아직 정해지지 않아 train 으로 두고 notes 에 적는다.
 
@@ -21,7 +23,8 @@ import numpy as np
 from extractors import EXO_NAMES
 from io_utils import find_calib, read_records
 
-FIELDS = ["episode_id", "hand", "calib", "start", "end", "frames", "tri_wrist", "reproj_wrist", "missing_wrist",
+TRIM_S = 0.1
+FIELDS = ["episode_id", "hand", "method", "calib", "start", "end", "frames", "tri_wrist", "reproj_wrist", "missing_wrist",
           "pinch_missing", "run_start", "run_end", "run_len", "error"]
 
 
@@ -46,38 +49,65 @@ def longest_run(ok):
     return int(s[i]), int(e[i])
 
 
+def trim_to_wrist(ep):
+    """손목 값이 TRIM_S 초 연속으로 있는 첫 프레임, 마지막 프레임 (구간 안 상대 번호, 끝 미포함). 없으면 None."""
+    meta = json.load(open(ep / "meta.json"))
+    ok = np.isfinite(np.load(ep / "keypoints.npy")[:, EXO_NAMES.index("wrist")]).all(axis=1)
+    k = max(int(round(TRIM_S * meta["exo_fps"])), 1)
+    d = np.diff(np.r_[0, ok.astype(int), 0])
+    runs = [(a, b) for a, b in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)) if b - a >= k]
+    return (int(runs[0][0]), int(runs[-1][1])) if runs else None
+
+
 def summarize(row, ep):
     q = json.load(open(ep / "quality.json"))
     w = EXO_NAMES.index("wrist")
     s, e = longest_run(np.isfinite(np.load(ep / "keypoints.npy")[:, w]).all(axis=1))
+    mw = q.get("manual_wrist", {}).get("missing_after_manual", q["missing_after"][w])
     row.update(frames=q["frames"], tri_wrist=q["tri_ok_ratio"][w], reproj_wrist=q["tri_reproj_median_px"][w],
-               missing_wrist=q["missing_after"][w], pinch_missing=round(q["pinch_missing"], 4),
+               missing_wrist=mw, pinch_missing=round(q["pinch_missing"], 4),
                run_start=row["start"] + s, run_end=row["start"] + e, run_len=e - s)
 
 
 def run_one(job):
-    a, eid, rec, start, end = job
+    a, eid, rec, start, end, method = job
     task_dir = eid.split("_")[0]
     calib = find_calib(a.calib_dir, eid)
-    row = {"episode_id": eid, "hand": rec["hand"], "calib": calib.name, "start": start, "end": end}
+    row = {"episode_id": eid, "hand": rec["hand"], "method": method, "calib": calib.name, "start": start, "end": end}
     ep = Path(a.out).expanduser() / eid
-    if a.redo or not (ep / "meta.json").exists():
+
+    def process(s, e):
+        """s ~ e(미포함) 로 처리. 실패하면 마지막 오류 줄."""
         reserve = rec["purpose"] == "예비"
+        note = "박수 사이 임시 구간" if method == "clap" else f"동작 구간 ({method})"
         cmd = [sys.executable, str(Path(__file__).with_name("process_episode.py")),
                "--raw", str(Path(a.raw).expanduser() / task_dir), "--id", eid, "--task", rec["task"],
                "--collector", rec["collector"], "--hand", rec["hand"], "--tags", rec["case_tags"],
-               "--split", "train", "--start", str(start), "--end", str(end + 1),
+               "--split", "train", "--start", str(s), "--end", str(e),
                "--calib", str(calib), "--sync", a.sync,
                "--cache", str(Path(a.cache).expanduser() / task_dir), "--out", str(Path(a.out).expanduser()),
-               "--notes", "박수 사이 임시 구간" + (", 예비 (split 미정)" if reserve else "")]
+               "--notes", note + (", 예비 (split 미정)" if reserve else "")]
         if not a.copy_video:
             cmd.append("--link-video")
         if Path(a.wrist_clicks).exists():
             cmd += ["--wrist-clicks", a.wrist_clicks]
         r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode:
-            row["error"] = (r.stderr or r.stdout).strip().splitlines()[-1]
+        return (r.stderr or r.stdout).strip().splitlines()[-1] if r.returncode else None
+
+    if a.redo or not (ep / "meta.json").exists():
+        err = process(start, end)
+        if not err and method != "clap":
+            cut = trim_to_wrist(ep)
+            if cut is None:
+                err = "손목 값이 연속으로 있는 프레임 없음"
+            elif cut != (0, end - start):
+                start, end = start + cut[0], start + cut[1]
+                err = process(start, end)
+        if err:
+            row["error"] = err
             return row
+    m = json.load(open(ep / "meta.json"))
+    row.update(start=m["exo_start_frame"], end=m["exo_end_frame"])
     summarize(row, ep)
     return row
 
@@ -94,16 +124,22 @@ def main():
     ap.add_argument("--jobs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     ap.add_argument("--copy-video", action="store_true", help="영상을 복사 (기본은 원본 링크)")
     ap.add_argument("--redo", action="store_true")
+    ap.add_argument("--segments", help="seg_click.py merge 의 표 (episode_id,start,end,method). 없으면 박수 사이")
     ap.add_argument("--wrist-clicks", default=str(Path(__file__).resolve().parent.parent / "wrist_clicks.json"))
     a = ap.parse_args()
 
-    claps, rec = clap_frames(a.sync), read_records(a.records)
-    ids = sorted(a.ids) if a.ids else sorted(claps)
-    missing = [i for i in ids if i not in claps]
+    rec = read_records(a.records)
+    if a.segments:
+        with open(Path(a.segments).expanduser(), newline="", encoding="utf-8") as f:
+            spans = {r["episode_id"]: (int(r["start"]), int(r["end"]), r["method"]) for r in csv.DictReader(f)}
+    else:
+        spans = {k: (v[0], v[1] + 1, "clap") for k, v in clap_frames(a.sync).items()}
+    ids = sorted(a.ids) if a.ids else sorted(spans)
+    missing = [i for i in ids if i not in spans]
     if missing:
-        raise SystemExit(f"[중단] 박수 프레임 없음: {missing}")
+        raise SystemExit(f"[중단] 구간 없음: {missing}")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
-    jobs = [(a, i, rec[i], *claps[i]) for i in ids]
+    jobs = [(a, i, rec[i], *spans[i]) for i in ids]
     print(f"에피소드 {len(jobs)}개, 병렬 {a.jobs}", flush=True)
     out = Path(a.out).expanduser(); out.mkdir(parents=True, exist_ok=True)
     rows = []
