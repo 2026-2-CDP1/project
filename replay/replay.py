@@ -27,12 +27,27 @@ TCP_SITE = "attachment_site"  # 그리퍼를 쓰지 않으므로 플랜지를 TC
 COLLISION_EXCLUDE = {("base", "link1"), ("link5", "link7")}
 
 
-def load_model(model_path, exclude=COLLISION_EXCLUDE):
-    """robot.xml을 읽되 충돌 제외 쌍을 exclude로 바꿔 컴파일한다 (원본 파일은 건드리지 않음)."""
+def env_body_xml(box):
+    """환경 상자 하나 → MJCF body. box = {name, center (3,), size (3,) 전체 길이, quat (w,x,y,z)}, 로봇 베이스 좌표 m."""
+    c, s, q = box["center"], np.asarray(box["size"], float) / 2, box.get("quat", (1, 0, 0, 0))
+    f = lambda v: " ".join(f"{x:.6g}" for x in v)
+    return (f'<body name="{box["name"]}" pos="{f(c)}" quat="{f(q)}">'
+            f'<geom name="{box["name"]}" type="box" size="{f(s)}" rgba="0.55 0.75 1 0.5"/></body>')
+
+
+def load_model(model_path, exclude=COLLISION_EXCLUDE, env_boxes=(), env_exclude=()):
+    """robot.xml을 읽되 충돌 제외 쌍을 exclude로 바꿔 컴파일한다 (원본 파일은 건드리지 않음).
+
+    env_boxes   환경 상자(테이블·장애물) 목록. 월드에 고정된 body로 넣는다 (env_body_xml 형식)
+    env_exclude 환경 접촉 검사에서 뺄 (로봇 몸체, 환경 상자 이름) 쌍. 근거는 replay/scene.md
+    """
     path = Path(model_path).resolve()
     xml = path.read_text(encoding="utf-8")
     xml = re.sub(r'<exclude body1="[^"]+" body2="[^"]+"\s*/>', "", xml)
-    rule = "".join(f'<exclude body1="{a}" body2="{b}"/>' for a, b in sorted(exclude))
+    pairs = sorted(exclude) + sorted(env_exclude)
+    rule = "".join(f'<exclude body1="{a}" body2="{b}"/>' for a, b in pairs)
+    if env_boxes:
+        xml = xml.replace("</worldbody>", "".join(env_body_xml(b) for b in env_boxes) + "</worldbody>", 1)
     if "<contact>" in xml:
         xml = xml.replace("<contact>", "<contact>" + rule, 1)
     else:
@@ -45,9 +60,12 @@ def load_model(model_path, exclude=COLLISION_EXCLUDE):
 class Replayer:
     """모델을 한 번 읽어 두고 궤적을 여러 번 재생한다."""
 
-    def __init__(self, model_path=DEFAULT_MODEL):
+    def __init__(self, model_path=DEFAULT_MODEL, env_boxes=(), env_exclude=()):
+        """env_boxes가 있으면 테이블·장애물 장면을 같이 재생한다 (만드는 법: replay/scene.py)."""
         self.model_path = Path(model_path)
-        self.m = load_model(self.model_path)
+        self.env_boxes = [dict(b) for b in env_boxes]
+        self.env_exclude = sorted(tuple(p) for p in env_exclude)
+        self.m = load_model(self.model_path, env_boxes=self.env_boxes, env_exclude=self.env_exclude)
         self.collision_exclude = sorted(COLLISION_EXCLUDE)
         self.d = mujoco.MjData(self.m)
         self.arm_adr = np.array([self.m.jnt_qposadr[self.m.joint(n).id] for n in ARM_JOINTS])
@@ -115,6 +133,8 @@ class Replayer:
                 "tcp_site": self.tcp_site,
                 "robot_bodies": sorted(self.robot_bodies),
                 "collision_exclude": [list(p) for p in self.collision_exclude],
+                "env_bodies": [b["name"] for b in self.env_boxes],      # 비어 있으면 환경 장면 없음
+                "env_exclude": [list(p) for p in self.env_exclude],
             },
         }
 

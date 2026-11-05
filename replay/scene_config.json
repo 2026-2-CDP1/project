@@ -1,0 +1,9 @@
+{
+  "note": "테이블 좌표계(sync/exo_calib_T{n}.json table_frame), m. 테이블 윗면 = z 0. 값의 근거와 결정은 replay/scene.md",
+  "table": {
+    "x": null,
+    "y": null,
+    "thickness": 0.03
+  },
+  "table_exclude_bodies": ["link1"]
+}

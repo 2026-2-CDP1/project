@@ -30,7 +30,7 @@ out = replay(q_traj, gripper=None)
 | `tcp_pos` | `(T, 3)` | m | TCP(= 플랜지 `attachment_site`) 위치, **로봇 베이스 좌표** |
 | `tcp_quat` | `(T, 4)` | — | TCP 방향, 쿼터니언 **(w, x, y, z)** |
 | `contacts` | 길이 `T`의 리스트 | — | 프레임마다 `[(몸체1, 몸체2, 거리_m), ...]`. **거리가 음수면 두 몸체가 서로 파고든 것** |
-| `meta` | dict | — | `model`(모델 경로), `tcp_site`(TCP로 쓴 site 이름), `robot_bodies`(로봇 몸체 이름 목록), `collision_exclude`(검사에서 뺀 몸체 쌍) |
+| `meta` | dict | — | `model`(모델 경로), `tcp_site`(TCP로 쓴 site 이름), `robot_bodies`(로봇 몸체 이름 목록), `collision_exclude`(검사에서 뺀 몸체 쌍), `env_bodies`(환경 상자 이름, 비어 있으면 장면 없음), `env_exclude`(환경 검사에서 뺀 쌍) |
 
 - `tcp_pos`, `tcp_quat`, `contacts`는 역할 가이드 5-1 1단계의 형태 그대로다. `meta`는 추가 정보라 안 써도 된다.
 - 자기 충돌과 환경 충돌 구분: 두 몸체가 모두 `meta["robot_bodies"]`에 있으면 자기 접촉, 아니면 환경(테이블·장애물) 접촉. 도우미 함수 `is_self_contact(contact, robot_bodies)`
@@ -59,7 +59,7 @@ out = replay(q_traj, gripper=None)
 | 그리퍼 | **쓰지 않음** → `gripper` 인자는 형태만 검사하고 무시 | — |
 | 충돌 형상 | 링크마다 구(sphere) 여러 개 (메시 아님) | — |
 | 충돌 제외 쌍 | **2쌍** (base–link1, link5–link7). 원본 7쌍 중 나머지 5쌍은 닿지 않아 검사에 넣음 — `collision_exclude.md` (초안, 멘토 확인 전) | 모델이 바뀌면 다시 검사 |
-| 환경(테이블·장애물) | 없음 → 접촉은 모두 자기 접촉 | 장애물 시나리오가 확정되면 장면 파일 추가 |
+| 환경(테이블·장애물) | 기본 `replay()`는 없음. `Replayer(env_boxes=…, env_exclude=…)`로 에피소드마다 넣음 — `replay/scene.py`, 근거 `scene.md` | 테이블 크기 측정·4번 `to_robot_point`가 들어오면 실제 장면 |
 | 좌표 | 로봇 `base`가 월드 원점 → MuJoCo 월드 좌표 = 로봇 베이스 좌표 | — |
 
 ---
@@ -80,6 +80,25 @@ python replay/replay.py --check --out ~/out/본인이름/replay_check
 
 ---
 
+## 환경 장면 (v1.3)
+
+```python
+from replay.replay import Replayer
+from replay.scene import episode_env, load_obstacles, load_config
+boxes, exclude = episode_env(load_obstacles("obstacles.json").get("T3_E031"), load_config(), to_robot_point)
+r = Replayer(env_boxes=boxes, env_exclude=exclude)
+out = r.replay(q_traj)      # 반환 형태는 위와 같음. 환경 접촉은 is_self_contact가 거짓인 것
+```
+
+```bash
+python replay/scene.py --check --out ~/out/본인이름/scene_check     # 합성 검증
+```
+
+- 기본 `replay(q_traj)`는 그대로 로봇만 재생한다. 장면은 `Replayer`에 상자 목록을 넘길 때만 들어간다
+- 만드는 법·결정 사항은 [`scene.md`](scene.md)
+
+---
+
 ## 변경 기록
 
 | 날짜 | 버전 | 변경 |
@@ -87,3 +106,4 @@ python replay/replay.py --check --out ~/out/본인이름/replay_check
 | 2026-10-16 | v1 | 함수 형태 고정, 기구학 재생 구현 (플랜지 TCP, 그리퍼 없음) |
 | 2026-10-16 | v1.1 | 충돌 제외 쌍을 원본 7쌍 → 2쌍 (`collision_exclude.md`), `meta`에 `collision_exclude` 추가. 함수 형태는 그대로 |
 | 2026-11-03 | v1.2 | 그리퍼를 쓰지 않기로 함 → TCP를 플랜지 `attachment_site`로 확정, 플랜지·그리퍼 경고 삭제. `gripper` 인자는 남기고 무시. 함수 형태는 그대로 |
+| 2026-11-05 | v1.3 | 환경 장면: `Replayer(env_boxes, env_exclude)` 추가, `meta`에 `env_bodies`·`env_exclude` 추가, `replay/scene.py`. `replay()` 함수 형태·기본 동작은 그대로 (무작위 2000 자세 점검 결과 같음) |
