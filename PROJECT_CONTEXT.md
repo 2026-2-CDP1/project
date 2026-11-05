@@ -49,7 +49,7 @@ exit
   - `~/project` 안에 생긴 파일이 나중에 main에 같은 경로로 합쳐지면 다음 사람의 `git pull`이 막히고, 두 사람이 같은 경로에 덮어쓰게 됨
 - `git pull`이 에러로 멈추면 임의로 지우거나 되돌리지 말고 팀 채팅에 알려주세요 (누가 서버 `~/project`에서 커밋했거나 파일을 고쳐 둔 경우 멈출 수 있음. 커밋으로 갈라진 경우는 `pull.ff only` 설정으로 merge 대신 에러가 나게 해둠)
 - 그냥 `conda activate robot` 금지 → 반드시 `source ~/use_robot.sh` (이유는 5절)
-- `robot` 환경에 `pip install` 금지 → 필요한 패키지는 정구현에게 요청
+- `robot` 환경 패키지는 필요할 때 담당자가 직접 설치 — 반드시 5절 절차(백업 → 미리보기 → `python -m pip` 설치 → 확인 → 팀 알림·5절 표 갱신)대로
 - GPU는 `--job-name "작업_본인이름"`으로 잡고, 끝나면 바로 `exit`
 - 로그인 서버(ABRM02)에서 무거운 계산 직접 돌리지 않기 — 모든 팀 공용 입구
 - p02는 7일 넘으면 강제 종료 → 긴 학습은 체크포인트 저장
@@ -77,13 +77,16 @@ exit
 |---|---|---|---|---|
 | A | DLS IK | 자코비안 반복, 관절 한계는 계산 후 자르기 | 손목이 주 목표, 팔 회전각은 남는 자유도(영공간) 보조 목표 | pinocchio 자체 구현 |
 | B | 제약 QP IK | 반복, 관절 한계·속도를 QP 제약으로 | 손목·팔꿈치를 가중치 둔 여러 목표로 동시에 | mink (MuJoCo 모델 사용) |
-| C | 닫힌 해 | 반복 없이 기하 공식으로 해 전부 계산 | 관절 하나의 고정값을 1차원 탐색해 팔 회전각을 맞추고, 직전 프레임과 연속인 해 선택 | EAIK (C++ 기반 파이썬 패키지, URDF 자동 분해) |
+| C | 닫힌 해 | 반복 없이 기하 공식으로 해 전부 계산 | 3번 관절 값을 격자로 바꿔 가며 해를 전부 구하고, 팔꿈치가 사람과 가장 비슷한 해 선택 (팔꿈치가 안 보이면 직전 자세와 가장 가까운 해) | EAIK (C++ 기반 파이썬 패키지, URDF 자동 분해) |
 
 - 세 알고리즘 모두 **학습하지 않음**. 매 프레임 독립적으로 IK를 푸는 계산 절차.
 - **C는 IK-Geo → EAIK로 변경 (2026-11-04).** 오프라인 회의에서 멘토 의견: EAIK는 C++ 기반에 `pip`로 바로 쓰고, URDF(`robot/robot.urdf`)에서 구조를 자동 분해함. 내부는 IK-Geo와 같은 기하 부분문제라 "닫힌 해" 축의 의미는 같음
-  - EAIK는 7자유도를 관절 하나를 고정해 6자유도로 풀고, SEW 각을 직접 받지 않음 → 위의 1차원 탐색 래퍼(팔 회전각 맞추기)를 4번이 작성. 논문에는 "EAIK + 팔 회전각 1차원 탐색"으로 적음
+  - EAIK는 7자유도를 관절 하나를 고정해 6자유도로 풀고, SEW 각을 직접 받지 않음 → 3번 관절 격자 탐색 래퍼(팔 회전각 맞추기)를 4번이 작성 (`retarget/eaik_ik.py`). 논문에는 "EAIK + 팔 회전각 1차원 탐색"으로 적음
 - **D(PyRoki, 병렬 시드 최적화)는 제외 (2026-11-04).**
 - 팔꿈치는 위치가 아니라 **팔 회전각**(어깨-손목 축 둘레 팔꿈치 방향)으로 맞춤. 사람·로봇 팔 길이가 달라 위치는 맞출 수 없고, 회전각은 길이와 무관함. 입력: 어깨·팔꿈치·손목 3D + 손 방향 (3번 키포인트에 모두 있음)
+- **세 알고리즘 모두 사람 팔꿈치(팔 회전각)를 입력으로 줌 (2026-11-05 팀 결정, 질문 T10).** 같은 정보를 받아야 비교가 공정함. 10/16 멘토 답("알고리즘별 방식 그대로")과 달라 멘토에 알림 예정
+  - 사람 팔꿈치가 안 보이는 프레임은 셋 다 직전 팔꿈치를 유지, 보간하지 않음. 맨 앞 프레임은 처음 보인 팔꿈치 방향을 씀 (자세한 규칙: `retarget/README.md`)
+  - 그래서 5-2의 팔 회전각 차이는 순위가 아닌 참고 지표 (`metrics/definitions.md` 2.2)
 - 학습되는 것은 OpenVLA 하나뿐이며, 알고리즘 순위 비교에 쓰지 않음.
 
 ### 평가 지표 (5-2, 학습 없이 재생 결과로 계산)
@@ -102,6 +105,8 @@ exit
 | 시뮬레이터 | **MuJoCo** (Isaac Sim 불가 판정, 4절 참고) |
 | 촬영 장비 | iPhone (멘토 추천 앱: NeRFCapture / Spectacular Rec / AR Recorder — 연속 녹화가 기본인 Spectacular Rec 우선 테스트) |
 | 비교 알고리즘 | A DLS / B mink / C **EAIK** (2026-11-04: C를 IK-Geo → EAIK, D PyRoki 제외) |
+| 팔꿈치 입력 | **A·B·C 모두 사람 팔꿈치(팔 회전각)를 입력** (2026-11-05, T10). 안 보인 프레임은 직전 팔꿈치 유지 → `retarget/README.md` |
+| 패키지 설치 | 서버 `robot` 환경 패키지는 **필요할 때 담당자가 직접 설치** (2026-11-05). 절차는 5절 |
 | 학습 모델 | OpenVLA-7B + LoRA, 대표 알고리즘 1개 데이터로 1회 |
 | 코드 관리 | GitHub `2026-2-CDP1/project`, 브랜치 → PR → main |
 
@@ -201,12 +206,28 @@ echo "robot 환경 활성화됨: $(which python)"
 | qpsolvers | 4.13.0 |
 | daqp | 0.10.3 |
 | scipy | 1.15.3 |
+| eaik | 1.2.2 |
+| matplotlib | 3.10.9 |
 
 - mink·qpsolvers·daqp·scipy는 4번 역할 가이드 준비 단계 패키지(알고리즘 B), 2026-10-16 추가
+- eaik(알고리즘 C)·matplotlib, 2026-11-05 추가 (제효정). 함께 들어온 패키지: urchin, trimesh, lxml, pycollada, pyribbit, pyglet, networkx, pillow 등. 기존 패키지 버전은 바뀌지 않음. 설치 전 목록 백업: 서버 `~/robot_env_freeze_before_eaik.txt`
 
 - 확인: `python -c "import mujoco, pinocchio; print(mujoco.__version__, pinocchio.__version__)"`
-- **이 환경에 팀원이 임의로 pip install 하지 않기** (공유 환경, 동시 설치 시 꼬임) → 필요 패키지는 정구현에게 요청
-- 이후 추가 예정: OpenCV, pandas, matplotlib 등
+- 이후 추가 예정: OpenCV, pandas 등
+
+### 패키지 설치 (필요할 때 담당자가 직접, 2026-11-05)
+공유 환경이라 한 사람의 설치가 모두의 실행에 영향을 줍니다. 아래 순서를 지키고, **동시에 두 사람이 설치하지 않도록 설치 전 팀 채팅에 알립니다.**
+```bash
+source ~/use_robot.sh                                  # 프롬프트가 (robot) 인지 확인
+which python; python -m pip --version                  # 둘 다 .../envs/robot/... 이어야 함
+python -m pip freeze > ~/robot_env_freeze_before_<패키지>.txt          # 1) 백업
+python -m pip install --dry-run <패키지>==<버전>                         # 2) 미리보기: numpy·mujoco·pinocchio·scipy 버전이 바뀌면 멈추고 팀과 상의
+python -m pip install <패키지>==<버전>                                  # 3) 설치
+diff ~/robot_env_freeze_before_<패키지>.txt <(python -m pip freeze) | grep "^<"   # 4) 기존 패키지가 바뀌었으면 출력됨 (비어 있어야 정상)
+cd ~/project && python replay/replay.py --check --out ~/out/본인이름/replay_check  # 5) 재생 점검이 그대로 되는지
+```
+- **`pip` 대신 `python -m pip`**: `(base)` 상태나 PATH 순서 때문에 그냥 `pip`은 홈 폴더 옛 가상환경(`~/bin/pip`)에 설치될 수 있음 (2026-11-05 실제로 발생, 되돌림)
+- 설치 후 위 패키지 표에 버전을 적고 팀 채팅에 알립니다. 버전은 `==`로 고정합니다
 
 ---
 
@@ -333,14 +354,15 @@ project/
 
 ### 다음
 1. **3번 에피소드:** 에피소드마다 시작·끝 프레임 라벨(`episodes/labeling_rules.md`) → `episodes/tools/process_episode.py`로 키포인트·3D 궤적 생성 (보정은 태스크별 `--calib sync/exo_calib_T{n}.json`). 아직 실제 데이터에 돌리지 않음
-2. **4번 리타게팅:** `retarget/common.py` (사람 좌표 → 로봇 베이스 좌표, 팔 길이 맞추기, 팔 회전각 계산 — 세 알고리즘 공용) → `A_DLS`, `B_mink`, `C_eaik` → `retarget/<알고리즘>/<에피소드ID>.npz`
-   - C: EAIK로 iiwa14 왕복 검사(무작위 관절각 → FK → IK → FK) 먼저. 공유 `robot` 환경 설치는 정구현에게 요청
+2. **4번 리타게팅:** A·B·C 첫 구현 완료(2026-11-05, 시험 에피소드 T1_E004) → `retarget/README.md`. 남은 것: 멘토 확인(팔 길이 비율·로봇 자리, 팔꿈치 입력, C의 3번 관절 탐색), 3번 전체 에피소드가 나오면 일괄 실행 → `retarget/<알고리즘>/<에피소드ID>.npz`
+   - C: EAIK 왕복 검사 1000/1000 통과 (`retarget/eaik_check.py`). `robot` 환경에 eaik 1.2.2 설치 (5절)
 3. **5-2 지표:** `metrics/definitions.md` 멘토 확인 후 고정 → `metrics.py`, `summary.md`. 저크 Δt가 1/30으로 적혀 있으나 exo_front는 약 60 fps → 30 Hz로 맞출지 Δt를 고칠지 결정
 4. **6 RLDS 변환 · 7 OpenVLA LoRA 학습 · 8 평가:** 시작 전
 
 ### 보류·확인 필요
 - 멘토 쪽 소통 담당자 지정 후 미팅 일정
-- EAIK의 관절 고정 API와 고정할 관절·팔 회전각 맞추기 규칙 (4번, 멘토 확인)
+- C(EAIK)의 3번 관절 처리: 상수 고정이 아니라 프레임마다 격자 탐색 — 10/16 "3번 고정하지 말 것"에 맞는지 (4번, 멘토 확인)
+- 팔꿈치 입력 팀 결정(T10)을 멘토에 알리기, 팔 길이 비율·로봇 자리 (4번, 멘토 확인)
 - 팀원별 `git c` 등록 이메일이 각자 GitHub 계정(Settings → Emails)에 등록돼 있는지 확인
 - (선택) 서버 관리자에게 GPU 노드 드라이버 535+ 업그레이드 가능 여부 문의 → 가능하면 Isaac Sim 재검토
 - (선택) 팀원별 SSH 공개키를 서버 `~/.ssh/authorized_keys`에 등록 → 비밀번호 없이 접속·VS Code Remote-SSH 편의
