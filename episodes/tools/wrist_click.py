@@ -229,7 +229,7 @@ def cmd_apply(a):
         pts = {}
         for fs, v in clicks[eid].items():
             i = int(fs) - s
-            if v.get("none") or not v["clicks"]:
+            if v.get("none") or not v["clicks"] or not 0 <= i < T:      # 구간이 바뀌어도 그 안의 값만 쓴다
                 continue
             X, _ = triangulate(v["clicks"], uv2[wc, i, WRIST], cams, side, a.max_px or DEFAULT_TRI["max_reproj_px"])
             if X is None:
