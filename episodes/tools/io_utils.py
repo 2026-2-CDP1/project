@@ -3,6 +3,9 @@ from pathlib import Path
 import numpy as np
 
 
+RECALIB_DIR = Path(__file__).resolve().parent.parent / "calib"     # recalib.py 로 다시 구한 구간별 보정 파일
+
+
 def read_ts(path):
     """프레임 시각 CSV -> (T,) 초. 헤더가 있으면 'timestamp'/'t'/'time' 열, 없으면 마지막 열."""
     with open(path, newline="") as f:
@@ -93,6 +96,16 @@ def read_records(path):
 def kp_cache_path(cache, cam, episode_id, hand):
     """extract_all.py 가 저장하는 영상 전체 2D(exo) / pinch(ego) 위치. process_episode.py --cache 가 읽는다."""
     return Path(cache) / cam / f"{episode_id}_{hand}.npy"
+
+
+def find_calib(calib_dir, episode_id):
+    """에피소드에 맞는 보정 파일. calib_dir 은 체커보드 원본 폴더 (sync/).
+    촬영 중 카메라가 움직인 구간은 episodes/calib/exo_calib_T1_E017.json (E017 부터) 처럼 따로 있다.
+    시작 번호가 이 에피소드 이하인 것 중 가장 늦은 파일, 없으면 calib_dir/exo_calib_T{n}.json."""
+    calib_dir, (task, num) = Path(calib_dir).expanduser(), episode_id.split("_")
+    seg = sorted((p for d in (calib_dir, RECALIB_DIR) for p in d.glob(f"exo_calib_{task}_E*.json")
+                  if p.stem.split("_")[-1] <= num), key=lambda p: p.stem)
+    return seg[-1] if seg else calib_dir / f"exo_calib_{task}.json"
 
 
 class SyncError(Exception):
