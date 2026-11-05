@@ -1,16 +1,16 @@
-# 구간별 exo 보정 파일
+# 구간별 exo 보정 파일 (재보정)
 
-촬영 중 카메라가 움직인 구간의 보정값이에요. 그 구간을 찍은 체커보드 영상이 없어서, 손 키포인트로 다시 구했어요 (`tools/recalib.py`). 형식은 `sync/exo_calib_T{n}.json`과 같아요.
+촬영 중 카메라가 움직인 구간의 보정값이에요. 그 구간을 찍은 체커보드 영상이 없어서, 손 키포인트로 다시 구했어요 (`episodes/tools/recalib.py`). 형식은 `exo_calib_T{n}.json`과 같아요.
 
 | 에피소드 | 보정 파일 |
 |---|---|
-| T1 E001~E016 | `sync/exo_calib_T1.json` |
-| **T1 E017~E075** | **`episodes/calib/exo_calib_T1_E017.json`** |
-| T2 E001~E069 | `sync/exo_calib_T2.json` |
-| **T2 E070~E075** | **`episodes/calib/exo_calib_T2_E070.json`** |
-| T3 E001~E075 | `sync/exo_calib_T3.json` |
+| T1 E001~E016 | `exo_calib_T1.json` |
+| **T1 E017~E075** | **`exo_calib_T1_E017.json`** |
+| T2 E001~E069 | `exo_calib_T2.json` |
+| **T2 E070~E075** | **`exo_calib_T2_E070.json`** |
+| T3 E001~E075 | `exo_calib_T3.json` |
 
-코드에서는 `tools/io_utils.find_calib("<sync 폴더>", "T1_E040")`로 고르면 돼요.
+코드에서는 `episodes/tools/io_utils.find_calib("<sync 폴더>", "T1_E040")`로 고르면 돼요.
 
 ## 무엇이 움직였나
 
@@ -19,6 +19,20 @@
 - **T1 E017부터:** exo_right 약 (+198, +20) px, 약 4° 기울어짐. exo_left 약 10~45 px (측정 잡음 큼)
 - **T2 E070부터:** exo_left 약 +33 px
 - T2 E054~E069, T3 E052~E075: exo_left 약 12 px. 다시 구해도 이득이 거의 없어서 원본을 그대로 써요.
+
+## 원본과 무엇이 다른가
+
+원본은 체커보드 영상으로 구한 값이고(재투영 오차 약 1 px), 구간별 파일은 손 키포인트로 다시 구한 값이에요.
+
+| 파일 | front | left | right |
+|---|---|---|---|
+| `exo_calib_T1_E017.json` | 같음 | 방향 1.33° (위치 같음) | **방향 10.59°, 위치 3.4 cm** |
+| `exo_calib_T2_E070.json` | 같음 | 방향 1.22° (위치 같음) | 같음 |
+
+- K, `dist`, 테이블 좌표계는 원본과 같아요. 그래서 3D 결과는 파일이 달라도 같은 좌표계로 비교할 수 있어요.
+- 다시 구한 카메라에서는 체커보드 오차 값(`reproj_err_px_mean` 등)을 지웠어요. 대신 `valid_for`에 적용 구간, `recalib`에 계산 방식과 검증 결과가 있어요.
+
+**잘못된 파일을 쓰면:** T1 E017 이후에 `exo_calib_T1.json`을 쓰면 카메라 3대가 함께 맞는 점이 하나도 없어요. 2대로 줄여서 3D는 계속 나오지만 위치가 틀릴 수 있고, 오차는 오히려 작게 나와서 알아채기 어려워요.
 
 ## 검증 (계산에 안 쓴 에피소드)
 

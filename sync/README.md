@@ -7,7 +7,7 @@
 | 필요한 것 | 파일 | 한 줄 설명 |
 |---|---|---|
 | 카메라끼리 시간 맞추기 | `sync.csv` | 에피소드 × 카메라마다 기준 카메라(`exo_front`)와의 시간 차 |
-| 2D → 3D (테이블 좌표) | `exo_calib_T1.json` · `exo_calib_T2.json` · `exo_calib_T3.json` | **태스크마다 하나**씩 있는 exo 카메라 3대의 K·R·t |
+| 2D → 3D (테이블 좌표) | `exo_calib_T1.json` · `exo_calib_T2.json` · `exo_calib_T3.json` | **태스크마다 하나**씩 있는 exo 카메라 3대의 K·R·t. **촬영 중 카메라가 움직인 구간은 파일이 따로 있음 (T1 E017~, T2 E070~, 3절)** |
 
 ---
 
@@ -72,6 +72,7 @@ t_ref = t + offset_start_s + drift_s × (t − s0) / (s1 − s0)
 ## 3. `exo_calib_T{n}.json` — exo 외부 보정
 
 - **에피소드 ID의 태스크 번호로 파일을 골라요.** `T2_E017` → `exo_calib_T2.json`. 태스크마다 카메라 자리가 조금씩 달라요 (태스크 사이 2~4 cm).
+- **단, 촬영 중 카메라가 움직인 구간은 다른 파일을 써요.** T1 E017~E075 → `exo_calib_T1_E017.json`, T2 E070~E075 → `exo_calib_T2_E070.json`. 체커보드가 아니라 손 키포인트로 다시 구한 값이에요 (`RECALIB.md`). `episodes/tools/io_utils.find_calib`이 자동으로 골라요.
 - 형식은 3번 `episodes/tools/multiview.load_calibs`와 같아요.
 
 ```json
@@ -132,6 +133,7 @@ python fit_clock.py --sync ~/out/신서연/sync_T2.csv --raw ~/data/raw/T2 \
 |---|---|---|
 | `sync.csv` | **결과** | 시간 차 표 (T1~T3, 675행) |
 | `exo_calib_T1.json` `exo_calib_T2.json` `exo_calib_T3.json` | **결과** | 태스크별 exo 외부 보정 |
+| `exo_calib_T1_E017.json` `exo_calib_T2_E070.json` | **결과** | 카메라가 움직인 구간의 보정 (`RECALIB.md`) |
 | `run_task.sh` | 코드 | 태스크 하나 전체 실행 (①) |
 | `detect_claps.py` | 코드 | 영상에서 박수 시각 검출 |
 | `make_sync_csv.py` | 코드 | 박수를 카메라끼리 짝지어 시간 차 표 |
