@@ -104,6 +104,13 @@ def main():
     uv_views = np.stack(uv_views)                                   # (C,T,K,2)
     tri_st = {**DEFAULT_TRI, "max_reproj_px": a.max_reproj_px}
     kp_raw, tri_err, n_views = triangulate_series(uv_views, [cams[c] for c in names], tri_st)
+    # 팔꿈치는 front + 작업 손 쪽 카메라로 만든다. 반대쪽 카메라에서는 팔이 몸에 가려 Pose 가 짐작한 값이 섞여
+    # 아래팔 길이가 한 에피소드 안에서 10 cm 넘게 흔들렸다 (224개: 8개 -> 0개). 두 대로 안 되는 프레임만 세 대 값을 쓴다.
+    e = ex.EXO_NAMES.index("elbow")
+    pair = [names.index(ref), names.index(a.hand)]
+    X2, err2, nv2 = triangulate_series(uv_views[pair][:, :, [e]], [cams[names[i]] for i in pair], tri_st)
+    ok2 = np.isfinite(X2[:, 0]).all(axis=1)
+    kp_raw[ok2, e], tri_err[ok2, e], n_views[ok2, e] = X2[ok2, 0], err2[ok2, 0], nv2[ok2, 0]
 
     # 8단계: 보정 (한 번만)
     kp, report, st = correct(kp_raw, fps)
@@ -178,6 +185,7 @@ def main():
         "cameras": names, "ref_camera": ref,
         "camera_sync": {c: sync[c] for c in names[1:]},
         "smoothing": settings_string(st) + f", tri(min_views={tri_st['min_views']},reproj<={tri_st['max_reproj_px']}px)",
+        "elbow_views": [ref, a.hand],
         "notes": a.notes,
     }
     json.dump(meta, open(out / "meta.json", "w"), ensure_ascii=False, indent=2)
