@@ -7,17 +7,18 @@
   python seg_click.py frames --segments ~/out/seohyeon/segments.csv --raw ~/data/raw --sync ../../sync/sync.csv --out ~/out/seohyeon/seg_frames
   로컬로 받기: scp -P 10000 -r coss37@155.230.81.91:~/out/seohyeon/seg_frames ~/Downloads/
 
-2) 로컬: 표시
-  python seg_click.py click --frames ~/Downloads/seg_frames
+2) 로컬: 표시 (여러 명이 나눠 할 때는 ../SEGMENT_MARKING.md)
+  python seg_click.py click --frames ~/Downloads/seg_frames --name 홍길동 --part 1/3
 
   d / a      다음 / 이전 사진 (0.2초)      e / w  다음 / 이전 5장
   1 / 2      지금 사진을 시작 / 끝으로
   s          저장하고 다음 에피소드        b  이전 에피소드
   x          동작을 알 수 없음으로 저장    q  끝내기
-  저장할 때마다 <frames>/seg_marks.json 에 바로 쓴다. 다시 켜면 안 한 에피소드부터.
+  저장할 때마다 <frames>/seg_marks_<이름>.json 에 바로 쓴다. 다시 켜면 안 한 에피소드부터.
 
 3) 합치기: 자동 구간 + 표시한 구간 -> 일괄 처리가 읽는 표
-  python seg_click.py merge --segments ~/out/seohyeon/segments.csv --marks ../seg_marks.json --out ../segments_final.csv
+  python seg_click.py merge --segments ~/out/seohyeon/segments.csv --marks ../seg_marks_*.json --out ../segments_final.csv
+  두 사람이 같은 에피소드를 표시했으면 차이를 출력하고 앞 파일의 값을 쓴다.
   열: episode_id, start, end(미포함), method(auto/manual). 없는 에피소드는 표에 넣지 않는다.
 """
 import argparse, csv, json
@@ -66,12 +67,27 @@ def cmd_frames(a):
     print("저장 ->", out)
 
 
+def pick_ids(ids, chosen, part):
+    """--ids 가 있으면 그것만, --part k/n 이면 전체를 n 등분한 k 번째 묶음 (이어진 번호라 배치가 덜 섞임)."""
+    if chosen:
+        missing = [i for i in chosen if i not in ids]
+        if missing:
+            raise SystemExit(f"[중단] 사진 없는 에피소드: {missing}")
+        return list(chosen)
+    if part:
+        k, n = (int(x) for x in part.split("/"))
+        if not 1 <= k <= n:
+            raise SystemExit(f"[중단] --part {part}: 1/{n} ~ {n}/{n} 중 하나")
+        return [str(x) for x in np.array_split(np.array(ids), n)[k - 1]]
+    return ids
+
+
 class Marker:
     def __init__(self, a):
         self.a, self.dir = a, Path(a.frames).expanduser()
         self.index = json.load(open(self.dir / "index.json"))
-        self.ids = sorted(self.index)
-        self.out = self.dir / "seg_marks.json"
+        self.ids = pick_ids(sorted(self.index), a.ids, a.part)
+        self.out = self.dir / f"seg_marks_{a.name}.json"
         self.data = json.load(open(self.out)) if self.out.exists() else {}
         self.k = next((i for i, e in enumerate(self.ids) if e not in self.data), 0)
         self.load()
@@ -154,7 +170,16 @@ def cmd_click(a):
 
 
 def cmd_merge(a):
-    rows, marks = read_segments(a.segments), json.load(open(Path(a.marks).expanduser()))
+    rows, marks = read_segments(a.segments), {}
+    for path in a.marks:
+        for e, v in json.load(open(Path(path).expanduser())).items():
+            if e not in marks:
+                marks[e] = v
+            elif v != marks[e]:
+                old = marks[e]
+                ds = abs(v.get("start", 0) - old.get("start", 0)) if "start" in v and "start" in old else None
+                de = abs(v.get("end", 0) - old.get("end", 0)) if "end" in v and "end" in old else None
+                print(f"  두 사람 표시 다름 {e}: 시작 차 {ds}, 끝 차 {de} 프레임 ({Path(path).name}) -> 앞 파일 값 사용")
     out, missing, unknown = [], [], []
     for r in rows:
         e = r["episode_id"]
@@ -184,8 +209,11 @@ def main():
     f.add_argument("--step", type=float, default=0.2, help="사진 간격 (s)")
     f.add_argument("--width", type=int, default=560)
     c = sub.add_parser("click"); c.add_argument("--frames", required=True)
+    c.add_argument("--name", required=True, help="저장 파일에 붙일 이름 (영문 권장)")
+    c.add_argument("--part", help="전체를 n 등분한 k 번째, 예: 2/3")
+    c.add_argument("--ids", nargs="*", help="이 에피소드만 (--part 보다 우선)")
     m = sub.add_parser("merge")
-    m.add_argument("--segments", required=True); m.add_argument("--marks", required=True); m.add_argument("--out", required=True)
+    m.add_argument("--segments", required=True); m.add_argument("--marks", nargs="+", required=True); m.add_argument("--out", required=True)
     a = ap.parse_args()
     {"frames": cmd_frames, "click": cmd_click, "merge": cmd_merge}[a.cmd](a)
 
