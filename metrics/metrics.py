@@ -1,6 +1,6 @@
 """5-2 지표 계산: 리타게팅 결과(관절 궤적)를 재생해 정의서의 지표를 계산한다.
 
-정의는 metrics/definitions.md(v0.2)가 기준이다. 이 코드와 정의서가 다르면 정의서를 따르고 코드를 고친다.
+정의는 metrics/definitions.md(v0.3)가 기준이다. 이 코드와 정의서가 다르면 정의서를 따르고 코드를 고친다.
 모든 지표는 에피소드 하나 x 알고리즘 하나 단위이고, 낮을수록 좋다.
 
 GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/use_robot.sh 후 srun (--gres 없이) CPU 노드에서.
@@ -14,38 +14,48 @@ GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/
     python metrics/selftest.py --out ~/out/신서연/metrics_selftest
 
 폴더 구조 (각 담당 문서 기준):
-    <retarget>/<알고리즘>/<에피소드ID>.npz    q (T,7), status (T,), saturated (T,7), pos_err (T,)   ← 4번
+    <retarget>/<알고리즘>/<에피소드ID>.npz    q (T,7), status (T,), pos_err (T,), [rot_err (T,), time_ms (T,)]  ← 4번
     <episodes>/<에피소드ID>/                   keypoints.npy (T,7,3), keypoint_names.json, exo_ts.csv,
                                               meta.json, labels.json                                ← 3번
 """
 import argparse
 import csv
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 LIMITS_CSV = REPO / "robot" / "joint_limits.csv"
-EPS_LIMIT = 1e-6          # 2.1 수치 오차로 보는 한계 초과량 (rad)
-JERK_HZ = 30.0            # 2.6 저크는 이 주기로 맞춰 계산
-JERK_DT_TOL = 1e-3        # 2.6 맞춘 Δt가 1/30 s와 이 비율 넘게 다르면 표시
+URDF = REPO / "robot" / "robot.urdf"
+EPS_LIMIT = 1e-6                 # 2.1 수치 오차로 보는 한계 초과량 (rad)
+PROX_RAD = np.deg2rad(1.0)       # 2.2 한계 근접으로 보는 거리 δ = 1°
+RESAMPLE_HZ = 30.0               # 2.6·2.7 저크·속도는 이 주기로 맞춰 계산
+DT_TOL = 1e-3                    # 맞춘 Δt가 1/30 s와 이 비율 넘게 다르면 표시
+SEW_VERTICAL_COS = 0.99          # 2.8 어깨–손목 축이 거의 수직이면 팔 회전각을 정의할 수 없어 그 프레임 제외
+ROBOT_SEW_BODIES = ("link2", "link4", "link6")   # 로봇 어깨·팔꿈치·손목 = 관절 2·4·6 중심 (iiwa SEW 규약)
 
 # 순위 사용 여부는 definitions.md 7절. 표·집계에서 이 순서로 쓴다
 METRICS = [
-    "limit_violation_rate", "limit_saturation_rate",
-    "self_collision_rate", "max_penetration_m",
-    "ik_failure_rate", "ik_not_converged_rate", "ik_no_solution_rate",
-    "jerk_rms", "grasp_dist_m",
-    "track_pos_err_mean_m", "env_collision_rate", "env_max_penetration_m",
+    # 순위
+    "ik_failure_rate", "jerk_rms", "velocity_limit_exceed_rate", "limit_proximity_rate",
+    "arm_angle_diff_rad", "self_collision_rate",
+    # 안전 확인 (0이어야 함)
+    "limit_violation_rate",
+    # 세부·참고
+    "ik_not_converged_rate", "ik_no_solution_rate", "max_penetration_m",
+    "track_pos_err_mean_m", "track_rot_err_mean_rad", "grasp_dist_m",
+    "env_collision_rate", "env_max_penetration_m", "min_manipulability", "compute_ms_median",
 ]
-REFERENCE_ONLY = {"track_pos_err_mean_m", "env_collision_rate", "env_max_penetration_m"}
+RANKED = ["ik_failure_rate", "jerk_rms", "velocity_limit_exceed_rate", "limit_proximity_rate",
+          "arm_angle_diff_rad", "self_collision_rate"]   # arm_angle_diff_rad는 조건부 (정의서 2.8)
 
 
-# ---------------------------------------------------------------- 지표 하나씩 (정의서 2절)
+# ---------------------------------------------------------------- 로봇 한계 (1번 파일)
 
-def load_limits(path=LIMITS_CSV):
-    """1번 joint_limits.csv → lo, hi (7,) rad. 관절 순서 joint1~7을 확인한다."""
+def load_limits(path=LIMITS_CSV, urdf=URDF):
+    """관절 하한·상한 (joint_limits.csv)과 속도 한계 (robot.urdf <limit velocity>) → lo, hi, vmax (7,)."""
     with open(path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     names = [r["joint"] for r in rows]
@@ -53,18 +63,22 @@ def load_limits(path=LIMITS_CSV):
         raise ValueError(f"joint_limits.csv 관절 순서가 joint1~7이 아님: {names}")
     lo = np.array([float(r["lower_rad"]) for r in rows])
     hi = np.array([float(r["upper_rad"]) for r in rows])
-    return lo, hi
+    # <transmission> 안의 같은 이름 <joint>는 빼고 실제 관절(type 있음)만
+    joints = {j.get("name"): j for j in ET.parse(urdf).getroot().iter("joint") if j.get("type")}
+    vmax = np.array([float(joints[r["urdf_joint"]].find("limit").get("velocity")) for r in rows])
+    return lo, hi, vmax
 
+
+# ---------------------------------------------------------------- 지표 하나씩 (정의서 2절)
 
 def limit_violation_rate(q, lo, hi, eps=EPS_LIMIT):
-    """2.1 한 관절이라도 한계를 eps 넘게 벗어난 프레임 비율."""
-    viol = ((q < lo - eps) | (q > hi + eps)).any(axis=1)
-    return float(viol.mean())
+    """2.1 (안전 확인) 한 관절이라도 한계를 eps 넘게 벗어난 프레임 비율. 0이 아니면 계산 오류를 의심."""
+    return float(((q < lo - eps) | (q > hi + eps)).any(axis=1).mean())
 
 
-def limit_saturation_rate(saturated):
-    """2.2 한 관절이라도 saturated가 참인 프레임 비율."""
-    return float(np.asarray(saturated, bool).any(axis=1).mean())
+def limit_proximity_rate(q, lo, hi, delta=PROX_RAD):
+    """2.2 한 관절이라도 한계에서 delta 안에 있는(넘은 것 포함) 프레임 비율. 출력 각도만 본다."""
+    return float(((q < lo + delta) | (q > hi - delta)).any(axis=1).mean())
 
 
 def contact_depths(contacts, robot_bodies):
@@ -85,12 +99,12 @@ def contact_depths(contacts, robot_bodies):
 
 
 def collision_rate(depth):
-    """2.3 / 2.9 파고든 접촉이 있는 프레임 비율."""
+    """2.3 / 2.11 파고든 접촉이 있는 프레임 비율."""
     return float((depth < 0).mean())
 
 
 def max_penetration(depth):
-    """2.4 / 2.9 가장 깊게 파고든 깊이 (m). 없으면 0."""
+    """2.4 / 2.11 가장 깊게 파고든 깊이 (m). 없으면 0."""
     return float(max(0.0, -depth.min())) if len(depth) else 0.0
 
 
@@ -107,70 +121,141 @@ def ik_rates(status):
     }
 
 
-def jerk_rms(q, ts, hz=JERK_HZ):
-    """2.6 30 Hz로 맞춘 궤적(보간·스무딩 없이 k칸마다 고름)의 저크 RMS (rad/s³).
-
-    반환: (jerk_rms, k, dt). 60 fps 에피소드면 k = 2, 30 fps면 k = 1.
-    """
-    q = np.asarray(q, float)
-    ts = np.asarray(ts, float)
-    step = np.median(np.diff(ts))
-    k = max(1, int(round((1.0 / hz) / step)))
+def resample(q, ts, hz=RESAMPLE_HZ):
+    """30 Hz로 맞춘 궤적 (보간·스무딩 없이 k칸마다 고름). 반환 (q_s, dt, k). 60 fps면 k=2, 30 fps면 k=1."""
+    q, ts = np.asarray(q, float), np.asarray(ts, float)
+    k = max(1, int(round((1.0 / hz) / np.median(np.diff(ts)))))
     q_s, ts_s = q[::k], ts[::k]
+    dt = float(np.median(np.diff(ts_s))) if len(ts_s) > 1 else float("nan")
+    return q_s, dt, k
+
+
+def jerk_rms(q, ts):
+    """2.6 30 Hz로 맞춘 궤적의 저크 RMS (rad/s³). 반환 (jerk_rms, k, dt)."""
+    q_s, dt, k = resample(q, ts)
     if len(q_s) < 4:
-        return float("nan"), k, float("nan")
-    dt = float(np.median(np.diff(ts_s)))
+        return float("nan"), k, dt
     jerk = np.diff(q_s, n=3, axis=0) / dt ** 3
     return float(np.sqrt(np.mean(jerk ** 2))), k, dt
 
 
+def velocity_limit_exceed_rate(q, ts, vmax):
+    """2.7 30 Hz로 맞춘 궤적에서 한 관절이라도 |Δq/Δt|가 속도 한계를 넘은 구간의 비율."""
+    q_s, dt, _ = resample(q, ts)
+    if len(q_s) < 2:
+        return float("nan")
+    v = np.abs(np.diff(q_s, axis=0)) / dt
+    return float((v > vmax).any(axis=1).mean())
+
+
+def sew_angle(S, E, W, down=(0.0, 0.0, -1.0)):
+    """2.8 팔 회전각 ψ (rad): 어깨–손목 축 둘레로 팔꿈치가 '아래 방향'에서 돌아간 각. (T,) 정의 안 되면 NaN.
+
+    a = 어깨→손목 단위벡터, 팔꿈치·아래 방향을 a에 수직인 평면에 투영해 둘 사이 부호 있는 각을 잰다.
+    """
+    S, E, W = (np.atleast_2d(np.asarray(x, float)) for x in (S, E, W))
+    a = W - S
+    a /= np.linalg.norm(a, axis=1, keepdims=True)
+    d = np.broadcast_to(np.asarray(down, float), a.shape)
+    perp = lambda v: v - np.sum(v * a, axis=1, keepdims=True) * a
+    e, r = perp(E - S), perp(d)
+    psi = np.arctan2(np.sum(a * np.cross(r, e), axis=1), np.sum(r * e, axis=1))
+    bad = (np.abs(np.sum(a * d, axis=1)) > SEW_VERTICAL_COS) | (np.linalg.norm(e, axis=1) < 1e-6)
+    psi[bad | ~np.all(np.isfinite(S + E + W), axis=1)] = np.nan
+    return psi
+
+
+def arm_angle_diff(psi_robot, psi_human):
+    """2.8 프레임별 |ψ_로봇 − ψ_사람| (2π 주기)의 중앙값 (rad). 둘 다 정의된 프레임만. 반환 (값, 쓴 프레임 비율)."""
+    ok = np.isfinite(psi_robot) & np.isfinite(psi_human)
+    if not ok.any():
+        return float("nan"), 0.0
+    d = np.abs(np.angle(np.exp(1j * (psi_robot[ok] - psi_human[ok]))))
+    return float(np.median(d)), float(ok.mean())
+
+
 def human_grasp_point(kp, names, g):
-    """2.7 파지 프레임 g의 엄지 끝·검지 끝 중점 (테이블 좌표, m). 하나라도 NaN이면 None."""
+    """2.10 파지 프레임 g의 엄지 끝·검지 끝 중점 (테이블 좌표, m). 하나라도 NaN이면 None."""
     i_th, i_ix = names.index("thumb_tip"), names.index("index_tip")
     p = (kp[g, i_th] + kp[g, i_ix]) / 2.0
     return None if not np.all(np.isfinite(p)) else p
 
 
+def robot_kinematics(replayer, q):
+    """프레임별 로봇 어깨·팔꿈치·손목 위치 (T,3)x3 와 TCP 조작성 (T,) — 2.8, 2.12."""
+    import mujoco
+    m, d = replayer.m, replayer.d
+    ids = [m.body(n).id for n in ROBOT_SEW_BODIES]
+    T = len(q)
+    P = np.zeros((3, T, 3))
+    w = np.zeros(T)
+    jp, jr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+    cols = [m.jnt_dofadr[m.joint(f"joint{i}").id] for i in range(1, 8)]
+    for t in range(T):
+        d.qpos[:] = replayer.q_full_home
+        d.qpos[replayer.arm_adr] = q[t]
+        mujoco.mj_forward(m, d)
+        for k, i in enumerate(ids):
+            P[k, t] = d.xpos[i]
+        mujoco.mj_jacSite(m, d, jp, jr, replayer.tcp_id)
+        J = np.vstack([jp, jr])[:, cols]
+        w[t] = np.sqrt(max(0.0, np.linalg.det(J @ J.T)))
+    return P[0], P[1], P[2], w
+
+
 # ---------------------------------------------------------------- 에피소드 하나
 
-def episode_metrics(res, lo, hi, ts, replayer, g=None, p_human=None, has_env_scene=False):
+def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human_sew=None,
+                    has_env_scene=False):
     """에피소드 하나 x 알고리즘 하나의 지표 (정의서 2절).
 
-    res          4번 npz 내용 (q, status, saturated, pos_err)
-    ts           (T,) exo_front 프레임 시각 s (저크 Δt용)
+    res          4번 npz 내용 (q, status, pos_err 필수 / rot_err, time_ms 있으면 참고 지표)
+    ts           (T,) exo_front 프레임 시각 s (저크·속도 Δt용)
     replayer     replay.replay.Replayer (재생 + 로봇 몸체 목록)
     g            파지 프레임 배열 인덱스 = grasp_frame − exo_start_frame. None이면 파지점 거리 NaN
     p_human      로봇 좌표로 옮긴 사람 파지점 (3,). None이면 파지점 거리 NaN
+    human_sew    로봇 좌표로 옮긴 사람 (어깨, 팔꿈치, 손목) 각 (T,3). None이면 팔 회전각 차이 NaN
     has_env_scene  재생 장면에 테이블·장애물이 있는지. 없으면 환경 지표를 0이 아니라 NaN으로 둔다
     반환: (지표 dict, 정보 dict)
     """
     q = np.asarray(res["q"], float)
     T = len(q)
-    for key, shape in [("status", (T,)), ("saturated", (T, 7)), ("pos_err", (T,))]:
-        if np.shape(res[key]) != shape:
-            raise ValueError(f"npz {key} 형태 {np.shape(res[key])} ≠ {shape}")
+    for key in ("status", "pos_err", "rot_err", "time_ms"):
+        if key in res and np.shape(res[key]) != (T,):
+            raise ValueError(f"npz {key} 형태 {np.shape(res[key])} ≠ ({T},)")
     if len(ts) != T:
         raise ValueError(f"exo_ts 길이 {len(ts)} ≠ 궤적 길이 {T}")
 
     out = replayer.replay(q)  # gripper는 쓰지 않음 (그리퍼 없음, 11/3)
     self_d, env_d = contact_depths(out["contacts"], replayer.robot_bodies)
     j, k, dt = jerk_rms(q, ts)
+    S, E, W, manip = robot_kinematics(replayer, q)
+    nan = float("nan")
 
     m = {
-        "limit_violation_rate": limit_violation_rate(q, lo, hi),
-        "limit_saturation_rate": limit_saturation_rate(res["saturated"]),
-        "self_collision_rate": collision_rate(self_d),
-        "max_penetration_m": max_penetration(self_d),
         **ik_rates(res["status"]),
         "jerk_rms": j,
-        "grasp_dist_m": float("nan"),
+        "velocity_limit_exceed_rate": velocity_limit_exceed_rate(q, ts, vmax),
+        "limit_proximity_rate": limit_proximity_rate(q, lo, hi),
+        "arm_angle_diff_rad": nan,
+        "self_collision_rate": collision_rate(self_d),
+        "limit_violation_rate": limit_violation_rate(q, lo, hi),
+        "max_penetration_m": max_penetration(self_d),
         "track_pos_err_mean_m": float(np.mean(res["pos_err"])),
-        "env_collision_rate": collision_rate(env_d) if has_env_scene else float("nan"),
-        "env_max_penetration_m": max_penetration(env_d) if has_env_scene else float("nan"),
+        "track_rot_err_mean_rad": float(np.mean(res["rot_err"])) if "rot_err" in res else nan,
+        "grasp_dist_m": nan,
+        "env_collision_rate": collision_rate(env_d) if has_env_scene else nan,
+        "env_max_penetration_m": max_penetration(env_d) if has_env_scene else nan,
+        "min_manipulability": float(manip.min()),
+        "compute_ms_median": float(np.median(res["time_ms"])) if "time_ms" in res else nan,
     }
-    info = {"frames": T, "jerk_step_k": k, "jerk_dt_s": dt,
-            "jerk_dt_flag": bool(np.isfinite(dt) and abs(dt * JERK_HZ - 1) > JERK_DT_TOL),
-            "grasp_note": "", "env_scene": has_env_scene}
+    info = {"frames": T, "resample_k": k, "dt_s": dt,
+            "dt_flag": bool(np.isfinite(dt) and abs(dt * RESAMPLE_HZ - 1) > DT_TOL),
+            "grasp_note": "", "arm_angle_frames": nan, "env_scene": has_env_scene,
+            "compute_ms_p95": float(np.percentile(res["time_ms"], 95)) if "time_ms" in res else nan}
+    if human_sew is not None:
+        psi_h = sew_angle(*human_sew)
+        m["arm_angle_diff_rad"], info["arm_angle_frames"] = arm_angle_diff(sew_angle(S, E, W), psi_h)
     if g is None:
         info["grasp_note"] = "grasp_frame 없음"
     elif not 0 <= g < T:
@@ -220,6 +305,15 @@ def load_to_robot_point(identity):
     return to_robot_point
 
 
+def map_points(to_robot, P):
+    """(T,3) 테이블 좌표 점들 → 로봇 좌표. NaN 프레임은 NaN 그대로."""
+    out = np.full_like(P, np.nan, dtype=float)
+    for t, p in enumerate(P):
+        if np.all(np.isfinite(p)):
+            out[t] = to_robot(p)
+    return out
+
+
 def run(a):
     import sys
     sys.path.insert(0, str(REPO))
@@ -227,7 +321,7 @@ def run(a):
 
     out_dir = Path(a.out).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
-    lo, hi = load_limits()
+    lo, hi, vmax = load_limits()
     replayer = Replayer()
     to_robot = load_to_robot_point(a.identity_transform)
     skip = unusable_episodes(a.sync) if a.sync else set()
@@ -257,13 +351,15 @@ def run(a):
                 names = read_json(d / "keypoint_names.json")
                 if len(kp) != len(res["q"]):
                     raise ValueError(f"keypoints 길이 {len(kp)} ≠ 궤적 길이 {len(res['q'])}")
+                human_sew = tuple(map_points(to_robot, kp[:, names.index(n)])
+                                  for n in ("shoulder", "elbow", "wrist"))
                 g = p_human = None
                 if labels.get("grasp_frame") is not None:
                     g = int(labels["grasp_frame"]) - int(labels["exo_start_frame"])
                     if 0 <= g < len(kp):
                         p = human_grasp_point(kp, names, g)
                         p_human = None if p is None else to_robot(p)
-                m, info = episode_metrics(res, lo, hi, ts, replayer, g, p_human,
+                m, info = episode_metrics(res, lo, hi, vmax, ts, replayer, g, p_human, human_sew,
                                           has_env_scene=a.env_scene)
             except Exception as e:  # 실패를 지우지 않음: 어떤 에피소드가 왜 안 됐는지 남긴다
                 info_rows.append({**base, "status": f"오류: {e}"})
@@ -278,8 +374,8 @@ def run(a):
     write_csv(out_dir / "metrics_long.csv", long_rows,
               ["algo", "episode_id", "task", "case_tags", "metric", "value"])
     write_csv(out_dir / "episode_info.csv", info_rows,
-              ["algo", "episode_id", "status", "frames", "jerk_step_k", "jerk_dt_s",
-               "jerk_dt_flag", "grasp_note", "env_scene"])
+              ["algo", "episode_id", "status", "frames", "resample_k", "dt_s", "dt_flag",
+               "grasp_note", "arm_angle_frames", "env_scene", "compute_ms_p95"])
     n_ok = sum(r["status"] == "ok" for r in info_rows)
     print(f"알고리즘 {algos}, 계산 {n_ok}건, 제외·오류 {len(info_rows) - n_ok}건 → {out_dir}")
 
@@ -292,7 +388,7 @@ def write_csv(path, rows, fields):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="5-2 지표 계산 (metrics/definitions.md v0.2)")
+    ap = argparse.ArgumentParser(description="5-2 지표 계산 (metrics/definitions.md v0.3)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="전 에피소드 x 알고리즘 지표 → metrics_long.csv")
     r.add_argument("--retarget", required=True, help="4번 결과 폴더 (<알고리즘>/<에피소드ID>.npz)")
