@@ -184,9 +184,10 @@ def main(out_dir):
 
     # ---- 궤적 품질: 환경 충돌률 = ① 장애물 파고듦 or ② 테이블 위 영역에서 팔꿈치가 테이블 면 아래
     f_sim = lambda p: np.array([0.1, -0.2, 0.3]) + 0.8 * np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]]) @ np.asarray(p)
-    P_table = np.array([[0.2, 0.1, -0.05], [0.2, 0.5, -0.05], [0.2, 0.1, 0.05]])   # 아래·영역 안 / 가장자리 밖 / 위
-    got = M.elbow_below_table(np.array([f_sim(p) for p in P_table]), M.table_frame_inverse(f_sim), 0.3)
-    check("팔꿈치–테이블 판정", "축척 0.8·회전 변환에서: 영역 안 아래 / 가장자리 밖 / 위 → 참·거짓·거짓",
+    oval = {"center": [0.2, 0.1], "radii": [0.3, 0.1], "angle_deg": 90.0}          # 긴 축이 y 방향인 타원
+    P_table = np.array([[0.2, 0.35, -0.05], [0.45, 0.1, -0.05], [0.2, 0.1, 0.05]])  # 안·아래 / 밖(돌리지 않으면 안) / 위
+    got = M.elbow_below_table(np.array([f_sim(p) for p in P_table]), M.table_frame_inverse(f_sim), oval)
+    check("팔꿈치–테이블 판정", "축척 0.8·회전 변환 + 90° 돌린 타원 윤곽: 윤곽 안 아래 / 윤곽 밖 / 위 → 참·거짓·거짓",
           float((got == [True, False, False]).all()), 1.0)
     tcp_home = r.replay(home[None])["tcp_pos"][0]
     rb = Replayer(env_boxes=[{"name": "env_obs1", "center": tcp_home.tolist(), "size": [0.1] * 3, "quat": [1, 0, 0, 0]}])
@@ -195,8 +196,8 @@ def main(out_dir):
     _, E_home, _, _ = M.robot_kinematics(r, home[None])
     _, E_rot, _, _ = M.robot_kinematics(r, q[-1:])
     lift = lambda p: np.asarray(p, float) + [0, 0, E_home[0, 2] + 0.05]      # 테이블 면(z=0)이 로봇 좌표에서 팔꿈치보다 5 cm 위
-    edge = (E_home[0, 1] + E_rot[0, 1]) / 2                                  # 돌린 팔꿈치만 테이블 위 영역
-    m, _ = run(res_of(q), rr=rb, has_obstacles=True, table=(lift, edge))
+    oval = {"center": E_rot[0, :2].tolist(), "radii": [0.1, 0.1], "angle_deg": 0.0}   # 돌린 팔꿈치만 윤곽 안
+    m, _ = run(res_of(q), rr=rb, has_obstacles=True, table=(lift, oval))
     check("환경: 장애물 부분", "home TCP에 상자, 25프레임", m["env_obstacle_rate"], 0.25)
     check("환경: 팔꿈치–테이블 부분", "돌린 75프레임만 테이블 위 영역에서 면 아래", m["env_elbow_below_table_rate"], 0.75)
     check("환경 충돌률 (둘 중 하나)", "25 + 75 프레임 → 1.0", m["env_collision_rate"], 1.0)
@@ -258,10 +259,12 @@ def run_end_to_end(r, home):
             o = off if not (eid == "T1_E998" and algo == "B_test") else off * 2   # E998은 B만 info가 다름
             np.savez(root / "ret" / algo / f"{eid}.npz", q=q, target_pos=out["tcp_pos"], target_quat=out["tcp_quat"],
                      time_ms=np.full(T, 3.0), info=json.dumps({"offset": o.tolist()}))
+    outl = root / "table_outline.json"
+    outl.write_text(json.dumps({"T1": {"center": [0, 0], "radii": [5, 5], "angle_deg": 0}, "T2": None, "T3": None}))
     obs = root / "obstacles.json"
     obs.write_text(json.dumps({"frame": "test", "episodes": {"T3_E001": {"obstacles": []}}}))   # 이 에피소드들은 장애물 없음
     a = argparse.Namespace(retarget=root / "ret", episodes=root / "eps", sync=None, out=root / "out", algos=None,
-                           ids=None, obstacles=obs, table_edge_y=1.0, identity_transform=False)
+                           ids=None, obstacles=obs, table_outline=outl, identity_transform=False)
     saved = M.load_transform
     M.load_transform = lambda identity: (lambda p, info: np.asarray(p, float) + np.asarray(info["offset"]))
     try:
