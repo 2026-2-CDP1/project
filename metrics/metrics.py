@@ -1,18 +1,19 @@
 """5-2 지표 계산: 리타게팅 결과(관절 궤적)를 재생해 정의서의 지표를 계산한다.
 
-정의는 metrics/definitions.md(v0.4)가 기준이다. 이 코드와 정의서가 다르면 정의서를 따르고 코드를 고친다.
+정의는 metrics/definitions.md(v1.0 고정)가 기준이다. 이 코드와 정의서가 다르면 정의서를 따르고 코드를 고친다.
 모든 지표는 에피소드 하나 x 알고리즘 하나 단위이고, 낮을수록 좋다 (성공률은 실패율 = 1 − 성공률로 저장).
 
 GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/use_robot.sh 후 srun (--gres 없이) CPU 노드에서.
 
 사용 (레포 루트에서, mujoco가 있는 환경):
     python metrics/metrics.py run --retarget <4번 결과 폴더> --episodes <3번 결과 폴더> \
-        --obstacles <3번 obstacles.json> --table-edge-y <m> --out ~/out/신서연/metrics
+        --obstacles episodes/obstacles.json --out ~/out/신서연/metrics      # 테이블 윤곽은 metrics/table_outline.json
     python metrics/selftest.py --out ~/out/신서연/metrics_selftest      # 합성 데이터 검증
 
 폴더 구조 (각 담당 문서 기준):
     <retarget>/<알고리즘>/<에피소드ID>.npz    q (T,7), target_pos (T,3), target_quat (T,4 wxyz) (손목 미검출 = NaN),
-                                              time_ms (T,), info (JSON: 좌표 변환 값) [, pos_err, rot_err]   ← 4번
+                                              time_ms (T,, 목표 없음 = NaN), elbow_used (T,), info (JSON: 좌표 변환 값)
+                                              [, pos_err, rot_err]                                              ← 4번
     <episodes>/<에피소드ID>/                   keypoints.npy (T,7,3), keypoint_names.json, exo_ts.csv,
                                               meta.json, labels.json                                ← 3번
 """
@@ -26,6 +27,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 LIMITS_CSV = REPO / "robot" / "joint_limits.csv"
+TABLE_OUTLINE = REPO / "metrics" / "table_outline.json"
 URDF = REPO / "robot" / "robot.urdf"
 EPS_LIMIT = 1e-6                 # 한계 초과로 보지 않는 수치 오차 (rad)
 SUCCESS_POS_M = 0.01             # 2.1 성공: 위치 오차 1 cm 이하
@@ -53,7 +55,7 @@ METRICS = [
     "limit_proximity_rate", "grasp_dist_m", "min_manipulability",
 ]
 RANKED = {
-    "정확도": ["retarget_fail_rate", "arm_angle_diff_rad"],      # arm_angle_diff_rad는 조건부 (정의서 2.2)
+    "정확도": ["retarget_fail_rate"],      # arm_angle_diff_rad는 참고 (세 알고리즘 모두 팔꿈치 입력, T10)
     "속도": ["compute_ms_median", "compute_ms_p95"],
     "궤적 품질": ["jerk_rms", "velocity_limit_exceed_rate", "self_collision_rate", "env_collision_rate"],
 }
@@ -136,11 +138,17 @@ def arm_angle_diff(psi_robot, psi_human):
 # ---------------------------------------------------------------- 속도
 
 def compute_time(time_ms, budget=BUDGET_MS):
-    """2.3 첫 프레임(준비 시간)을 뺀 계산 시간의 중앙값·95% 값 (ms)과 실시간 기준을 넘은 프레임 비율."""
-    t = np.asarray(time_ms, float)[1:]
+    """2.3 계산 시간의 중앙값·95% 값 (ms)과 실시간 기준(30 Hz, 33.3 ms)을 넘은 프레임 비율.
+
+    NaN = 목표가 없어 풀지 않은 프레임 → 뺀다. 남은 프레임 중 첫 프레임(준비 시간)도 뺀다.
+    반환 (중앙값, 95%, 초과율, NaN 비율).
+    """
+    t = np.asarray(time_ms, float)
+    missing = float(np.mean(~np.isfinite(t))) if len(t) else float("nan")
+    t = t[np.isfinite(t)][1:]
     if not len(t):
-        return float("nan"), float("nan"), float("nan")
-    return float(np.median(t)), float(np.percentile(t, 95)), float((t > budget).mean())
+        return float("nan"), float("nan"), float("nan"), missing
+    return float(np.median(t)), float(np.percentile(t, 95)), float((t > budget).mean()), missing
 
 
 # ---------------------------------------------------------------- 궤적 품질
@@ -196,10 +204,26 @@ def table_frame_inverse(to_robot):
     return lambda P: (np.atleast_2d(P) - o) @ Minv.T
 
 
-def elbow_below_table(E_robot, to_table, table_edge_y):
-    """2.6② 로봇 팔꿈치(관절 4 중심)가 테이블 위 영역(작업자 쪽 가장자리 y 안쪽)에서 테이블 면(z = 0)보다 아래인지 (T,)."""
+def inside_table(P_table, outline):
+    """테이블 좌표 점들이 테이블 윗면 윤곽 다각형 안(테이블 위 영역)인지 (T,). outline = table_outline.json 항목.
+
+    짝홀 규칙(점에서 +x로 뻗은 반직선이 변을 몇 번 지나는가).
+    """
+    V = np.asarray(outline["polygon"], float)
+    P = np.atleast_2d(P_table)[:, :2]
+    x, y = P[:, 0][:, None], P[:, 1][:, None]
+    x1, y1 = V[:, 0][None, :], V[:, 1][None, :]
+    x2, y2 = np.roll(V[:, 0], -1)[None, :], np.roll(V[:, 1], -1)[None, :]
+    straddle = (y1 > y) != (y2 > y)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        xc = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+    return ((straddle & (x < xc)).sum(axis=1) % 2) == 1
+
+
+def elbow_below_table(E_robot, to_table, outline):
+    """2.6② 로봇 팔꿈치(관절 4 중심)가 테이블 위 영역(윤곽 다각형 안)에서 테이블 면(z = 0)보다 아래인지 (T,)."""
     P = to_table(E_robot)
-    return (P[:, 2] < 0.0) & (P[:, 1] <= table_edge_y)
+    return (P[:, 2] < 0.0) & inside_table(P, outline)
 
 
 # ---------------------------------------------------------------- 참고
@@ -251,12 +275,12 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     g, p_human     파지 프레임 인덱스, 로봇 좌표 사람 파지점. 없으면 파지점 거리 NaN
     human_sew      로봇 좌표로 옮긴 사람 (어깨, 팔꿈치, 손목) 각 (T,3). 없으면 팔 회전각 차이 NaN
     has_obstacles  장애물 정보를 확인했는지 (obstacles.json을 읽음). 거짓이면 장애물 부분 NaN
-    table          (to_robot_point, 작업자 쪽 테이블 가장자리 y). 없으면 팔꿈치–테이블 부분 NaN
+    table          (to_robot_point, 테이블 윤곽 다각형 dict). 없으면 팔꿈치–테이블 부분 NaN
     반환: (지표 dict, 정보 dict)
     """
     q = np.asarray(res["q"], float)
     T = len(q)
-    shapes = {"time_ms": (T,), "pos_err": (T,), "rot_err": (T,),
+    shapes = {"time_ms": (T,), "elbow_used": (T,), "pos_err": (T,), "rot_err": (T,),
               "target_pos": (T, 3), "target_quat": (T, 4)}
     for key, shape in shapes.items():
         if key in res and np.shape(res[key]) != shape:
@@ -283,7 +307,7 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     # 추종 오차는 목표가 있는 프레임만 (NaN 제외). 전부 NaN이면 NaN
     stat = lambda x, f: float(f(x[np.isfinite(x)])) if x is not None and np.isfinite(x).any() else nan
 
-    ms_med, ms_p95, over = compute_time(res["time_ms"]) if "time_ms" in res else (nan, nan, nan)
+    ms_med, ms_p95, over, time_missing = compute_time(res["time_ms"]) if "time_ms" in res else (nan, nan, nan, nan)
 
     obstacle = obs_d < 0 if has_obstacles else None
     below = elbow_below_table(E, table_frame_inverse(table[0]), table[1]) if table else None
@@ -309,7 +333,9 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     info = {"frames": T, "resample_k": k, "dt_s": dt,
             "dt_flag": bool(np.isfinite(dt) and abs(dt * RESAMPLE_HZ - 1) > DT_TOL),
             "error_source": err_src, "target_missing_rate": missing, "grasp_note": "", "arm_angle_frames": nan,
-            "obstacles": has_obstacles, "table": table is not None}
+            "obstacles": has_obstacles, "table": table is not None, "time_missing_rate": time_missing,
+            # 4번이 사람 팔꿈치를 실제로 입력에 쓴 프레임 비율 (T4: 안 보이면 직전 팔꿈치 유지)
+            "elbow_used_rate": float(np.mean(np.asarray(res["elbow_used"], bool))) if "elbow_used" in res else nan}
     if human_sew is not None:
         m["arm_angle_diff_rad"], info["arm_angle_frames"] = arm_angle_diff(sew_angle(S, E, W), sew_angle(*human_sew))
     if g is None:
@@ -399,8 +425,10 @@ def run(a):
     base_replayer = Replayer()
     transform = load_transform(a.identity_transform)
     obstacles = load_obstacles(a.obstacles) if a.obstacles else None
-    if a.table_edge_y is None:
-        print("[주의] --table-edge-y가 없어 환경 충돌률의 팔꿈치–테이블 부분과 환경 충돌률은 NaN")
+    outlines = json.load(open(a.table_outline, encoding="utf-8")) if a.table_outline else {}
+    missing = [k for k in ("T1", "T2", "T3") if not outlines.get(k)]
+    if missing:
+        print(f"[주의] 테이블 윤곽이 없는 태스크 {missing}: 환경 충돌률의 팔꿈치–테이블 부분과 환경 충돌률은 NaN")
     if obstacles is None:
         print("[주의] --obstacles가 없어 환경 충돌률의 장애물 부분과 환경 충돌률은 NaN")
     skip = unusable_episodes(a.sync) if a.sync else set()
@@ -450,7 +478,8 @@ def run(a):
                     if 0 <= g < len(kp):
                         p = human_grasp_point(kp, names, g)
                         p_human = None if p is None else to_robot(p)
-                table = (to_robot, a.table_edge_y) if a.table_edge_y is not None else None
+                outline = outlines.get(ep.split("_")[0])
+                table = (to_robot, outline) if outline else None
                 m, info = episode_metrics(res, lo, hi, vmax, ts, replayer, g, p_human, human_sew,
                                           has_obstacles=obstacles is not None, table=table)
             except Exception as e:  # 실패를 지우지 않음: 어떤 에피소드가 왜 안 됐는지 남긴다
@@ -467,6 +496,7 @@ def run(a):
               ["algo", "episode_id", "task", "case_tags", "metric", "value"])
     write_csv(out_dir / "episode_info.csv", info_rows,
               ["algo", "episode_id", "status", "frames", "resample_k", "dt_s", "dt_flag", "error_source",
+               "target_missing_rate", "time_missing_rate", "elbow_used_rate",
                "grasp_note", "arm_angle_frames", "obstacles", "table"])
     n_ok = sum(r["status"] == "ok" for r in info_rows)
     print(f"알고리즘 {algos}, 계산 {n_ok}건, 제외·오류 {len(info_rows) - n_ok}건 → {out_dir}")
@@ -480,15 +510,15 @@ def write_csv(path, rows, fields):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="5-2 지표 계산 (metrics/definitions.md v0.4)")
+    ap = argparse.ArgumentParser(description="5-2 지표 계산 (metrics/definitions.md v1.0)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="전 에피소드 x 알고리즘 지표 → metrics_long.csv")
     r.add_argument("--retarget", required=True, help="4번 결과 폴더 (<알고리즘>/<에피소드ID>.npz)")
     r.add_argument("--episodes", required=True, help="3번 결과 폴더 (<에피소드ID>/...)")
     r.add_argument("--sync", default=str(REPO / "sync" / "sync.csv"), help="usable=0 에피소드 제외용")
     r.add_argument("--obstacles", help="3번 obstacles.json (환경 충돌률의 장애물 부분)")
-    r.add_argument("--table-edge-y", type=float,
-                   help="작업자 쪽 테이블 가장자리의 테이블 좌표 y (m) (환경 충돌률의 팔꿈치–테이블 부분)")
+    r.add_argument("--table-outline", default=str(TABLE_OUTLINE),
+                   help="태스크별 테이블 윗면 윤곽 다각형 (환경 충돌률의 팔꿈치–테이블 부분, metrics/table_outline.py로 구함)")
     r.add_argument("--out", required=True, help="출력 폴더 (~/project 밖, 예: ~/out/신서연/metrics)")
     r.add_argument("--algos", nargs="*", help="계산할 알고리즘 폴더 이름 (기본: --retarget 아래 있는 것 모두)")
     r.add_argument("--ids", nargs="*", help="이 에피소드만 (시험용)")
