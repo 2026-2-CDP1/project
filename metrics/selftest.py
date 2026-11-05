@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO / "metrics"))
 
 from replay.replay import Replayer  # noqa: E402
 import metrics as M  # noqa: E402
+import summary as S  # noqa: E402
 
 N = 100  # 합성 궤적 프레임 수
 RESULTS = []
@@ -234,8 +235,52 @@ def main(out_dir):
     ok_run, ok_info = run_end_to_end(r, home)
     check("전체 실행 (run)", "가짜 4번·3번 폴더 + obstacles.json + 테이블 가장자리 → metrics_long.csv", ok_run, 1)
     check("npz info로 좌표 변환", "알고리즘 2개 같은 info → ok, info가 다른 에피소드 → 오류로 기록", ok_info, 1)
+    summary_checks()
     write_report(out_dir)
     return all(ok for *_, ok in RESULTS)
+
+
+def summary_checks():
+    """집계(summary.py, 정의서 4·5절): 값을 아는 가짜 metrics_long.csv로 표·목록을 확인."""
+    root = Path(tempfile.mkdtemp())
+    eps = [f"T1_E{i:03d}" for i in range(1, 7)]
+    tags = {e: ("큰 이동" if i < 4 else "정밀 구간") for i, e in enumerate(eps)}
+    val = {  # (metric, algo) → 에피소드 6개 값
+        ("jerk_rms", "A_DLS"): [1, 2, 3, 4, 5, 60], ("jerk_rms", "B_mink"): [0.5, 1, 1, 1, 2, 2],
+        ("retarget_fail_rate", "A_DLS"): [0.1] * 6, ("retarget_fail_rate", "B_mink"): [0.0, 0.0, 0.2, 0.0, 0.0, 0.0],
+        ("min_manipulability", "A_DLS"): [0.05, 0.01, 0.03, 0.04, 0.02, 0.0],
+        ("limit_violation_rate", "B_mink"): [0, 0, 0, 0, 0.02, 0],
+    }
+    with open(root / "metrics_long.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["algo", "episode_id", "task", "case_tags", "metric", "value"])
+        for algo in ("A_DLS", "B_mink"):
+            for i, e in enumerate(eps):
+                for m in M.METRICS:
+                    v = val.get((m, algo), [0.0] * 6)[i]
+                    w.writerow([algo, e, "컵 잡기", tags[e], m, v])
+    with open(root / "episode_info.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["algo", "episode_id", "status", "dt_flag", "grasp_note"])
+        for algo in ("A_DLS", "B_mink"):
+            for e in eps:
+                st = "오류: 시험" if (algo == "B_mink" and e == "T1_E006") else "ok"     # E006은 B만 오류
+                w.writerow([algo, e, st, "False", ""])
+    algos, common, dropped, agg = S.run(root, root / "out")
+    check("집계: 공통 에피소드", "B에서만 오류 난 E006은 A에서도 뺌 → 5개", len(common), 5)
+    check("집계: 뺀 에피소드 목록", "E006이 이유와 함께 목록에", float("T1_E006" in dropped), 1.0)
+    n, _, med, worst, ws = agg[("jerk_rms", S.ALL, "A_DLS")]
+    check("집계: 중앙값", "A 저크 1~5 (E006의 60은 빠짐) → 중앙값 3", med, 3.0)
+    check("집계: 최악값", "같은 칸 → 최댓값 5", worst, 5.0)
+    check("집계: 케이스별", "큰 이동 E001~E004 → A 저크 1~4 중앙값 2.5", agg[("jerk_rms", "큰 이동", "A_DLS")][2], 2.5)
+    check("집계: 최소 조작성 최악", "클수록 좋은 지표 → 최솟값 0.01이 최악", agg[("min_manipulability", S.ALL, "A_DLS")][3], 0.01)
+    check("집계: 성공률 표시", "실패율 0.1 → 성공률 90.0%", float(S.fmt("retarget_fail_rate", 0.1) == "90.0%"), 1.0)
+    md = (root / "out" / "summary.md").read_text(encoding="utf-8")
+    worst_md = (root / "out" / "worst_episodes.md").read_text(encoding="utf-8")
+    check("집계: 표본 적음 표시", "큰 이동 n=4·정밀 구간 n=1 칸에 ⚠", float("n=4 ⚠" in md and "n=1 ⚠" in md), 1.0)
+    check("집계: 가장 좋은 알고리즘 굵게", "전체 저크 B(중앙값 1)가 굵게", float("| 전체 | 3 rad/s³ (5 rad/s³) n=5 | **1 rad/s³" in md), 1.0)
+    check("집계: 안전 확인", "B 위반율 0이 아님 → 경고", float("0이 아닌 칸이 있음" in md), 1.0)
+    check("집계: worst 목록", "A 저크 최악 E005 5가 맨 앞", float("T1_E005 5 rad/s³<br>T1_E004 4 rad/s³" in worst_md), 1.0)
 
 
 def run_end_to_end(r, home):
