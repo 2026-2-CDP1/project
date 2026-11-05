@@ -1,0 +1,13 @@
+{
+  "note": "테이블 윗면 윤곽 타원 (정의서 2.6②). 테이블 좌표계 m (sync/exo_calib_T{n}.json table_frame, 윗면 z = 0). 점 p가 테이블 위 영역 ⇔ ((p − center) · axes)² / radii² 합 ≤ 1, axes = angle_deg만큼 돌린 축. 측정: metrics/table_outline.py. null = 아직 측정 안 함 → 그 태스크는 팔꿈치–테이블 부분 NaN",
+  "T1": null,
+  "T2": null,
+  "T3": {
+    "center": [0.1196, 0.2514],
+    "radii": [0.4144, 0.3046],
+    "angle_deg": 169.29,
+    "size_m": [0.83, 0.61],
+    "source": "2026-11-05 노트북 test_rec/exo_front_11_04 의 exo_front 프레임 3개 (1104_check 2 s, T3_E040 1 s, T3_E056 1 s), exo_calib_T3.json front. 세 값의 중앙값",
+    "spread": "중심 최대 2.5 cm, 반지름 0.6 cm, 회전 0.7° 차이. 잔차 중앙값 0.7~0.8%"
+  }
+}

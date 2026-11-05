@@ -7,7 +7,7 @@ GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/
 
 사용 (레포 루트에서, mujoco가 있는 환경):
     python metrics/metrics.py run --retarget <4번 결과 폴더> --episodes <3번 결과 폴더> \
-        --obstacles <3번 obstacles.json> --table-edge-y <m> --out ~/out/신서연/metrics
+        --obstacles episodes/obstacles.json --out ~/out/신서연/metrics      # 테이블 윤곽은 metrics/table_outline.json
     python metrics/selftest.py --out ~/out/신서연/metrics_selftest      # 합성 데이터 검증
 
 폴더 구조 (각 담당 문서 기준):
@@ -26,6 +26,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 LIMITS_CSV = REPO / "robot" / "joint_limits.csv"
+TABLE_OUTLINE = REPO / "metrics" / "table_outline.json"
 URDF = REPO / "robot" / "robot.urdf"
 EPS_LIMIT = 1e-6                 # 한계 초과로 보지 않는 수치 오차 (rad)
 SUCCESS_POS_M = 0.01             # 2.1 성공: 위치 오차 1 cm 이하
@@ -53,7 +54,7 @@ METRICS = [
     "limit_proximity_rate", "grasp_dist_m", "min_manipulability",
 ]
 RANKED = {
-    "정확도": ["retarget_fail_rate", "arm_angle_diff_rad"],      # arm_angle_diff_rad는 조건부 (정의서 2.2)
+    "정확도": ["retarget_fail_rate"],      # arm_angle_diff_rad는 참고 (세 알고리즘 모두 팔꿈치 입력, T10)
     "속도": ["compute_ms_median", "compute_ms_p95"],
     "궤적 품질": ["jerk_rms", "velocity_limit_exceed_rate", "self_collision_rate", "env_collision_rate"],
 }
@@ -196,10 +197,19 @@ def table_frame_inverse(to_robot):
     return lambda P: (np.atleast_2d(P) - o) @ Minv.T
 
 
-def elbow_below_table(E_robot, to_table, table_edge_y):
-    """2.6② 로봇 팔꿈치(관절 4 중심)가 테이블 위 영역(작업자 쪽 가장자리 y 안쪽)에서 테이블 면(z = 0)보다 아래인지 (T,)."""
+def inside_table(P_table, outline):
+    """테이블 좌표 점들이 테이블 윗면 윤곽 타원 안(테이블 위 영역)인지 (T,). outline = table_outline.json 항목."""
+    a = np.radians(outline["angle_deg"])
+    axes = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    q = (np.atleast_2d(P_table)[:, :2] - np.asarray(outline["center"])) @ axes
+    r = np.asarray(outline["radii"])
+    return (q[:, 0] / r[0]) ** 2 + (q[:, 1] / r[1]) ** 2 <= 1.0
+
+
+def elbow_below_table(E_robot, to_table, outline):
+    """2.6② 로봇 팔꿈치(관절 4 중심)가 테이블 위 영역(윤곽 타원 안)에서 테이블 면(z = 0)보다 아래인지 (T,)."""
     P = to_table(E_robot)
-    return (P[:, 2] < 0.0) & (P[:, 1] <= table_edge_y)
+    return (P[:, 2] < 0.0) & inside_table(P, outline)
 
 
 # ---------------------------------------------------------------- 참고
@@ -251,7 +261,7 @@ def episode_metrics(res, lo, hi, vmax, ts, replayer, g=None, p_human=None, human
     g, p_human     파지 프레임 인덱스, 로봇 좌표 사람 파지점. 없으면 파지점 거리 NaN
     human_sew      로봇 좌표로 옮긴 사람 (어깨, 팔꿈치, 손목) 각 (T,3). 없으면 팔 회전각 차이 NaN
     has_obstacles  장애물 정보를 확인했는지 (obstacles.json을 읽음). 거짓이면 장애물 부분 NaN
-    table          (to_robot_point, 작업자 쪽 테이블 가장자리 y). 없으면 팔꿈치–테이블 부분 NaN
+    table          (to_robot_point, 테이블 윤곽 타원 dict). 없으면 팔꿈치–테이블 부분 NaN
     반환: (지표 dict, 정보 dict)
     """
     q = np.asarray(res["q"], float)
@@ -399,8 +409,10 @@ def run(a):
     base_replayer = Replayer()
     transform = load_transform(a.identity_transform)
     obstacles = load_obstacles(a.obstacles) if a.obstacles else None
-    if a.table_edge_y is None:
-        print("[주의] --table-edge-y가 없어 환경 충돌률의 팔꿈치–테이블 부분과 환경 충돌률은 NaN")
+    outlines = json.load(open(a.table_outline, encoding="utf-8")) if a.table_outline else {}
+    missing = [k for k in ("T1", "T2", "T3") if not outlines.get(k)]
+    if missing:
+        print(f"[주의] 테이블 윤곽이 없는 태스크 {missing}: 환경 충돌률의 팔꿈치–테이블 부분과 환경 충돌률은 NaN")
     if obstacles is None:
         print("[주의] --obstacles가 없어 환경 충돌률의 장애물 부분과 환경 충돌률은 NaN")
     skip = unusable_episodes(a.sync) if a.sync else set()
@@ -450,7 +462,8 @@ def run(a):
                     if 0 <= g < len(kp):
                         p = human_grasp_point(kp, names, g)
                         p_human = None if p is None else to_robot(p)
-                table = (to_robot, a.table_edge_y) if a.table_edge_y is not None else None
+                outline = outlines.get(ep.split("_")[0])
+                table = (to_robot, outline) if outline else None
                 m, info = episode_metrics(res, lo, hi, vmax, ts, replayer, g, p_human, human_sew,
                                           has_obstacles=obstacles is not None, table=table)
             except Exception as e:  # 실패를 지우지 않음: 어떤 에피소드가 왜 안 됐는지 남긴다
@@ -487,8 +500,8 @@ if __name__ == "__main__":
     r.add_argument("--episodes", required=True, help="3번 결과 폴더 (<에피소드ID>/...)")
     r.add_argument("--sync", default=str(REPO / "sync" / "sync.csv"), help="usable=0 에피소드 제외용")
     r.add_argument("--obstacles", help="3번 obstacles.json (환경 충돌률의 장애물 부분)")
-    r.add_argument("--table-edge-y", type=float,
-                   help="작업자 쪽 테이블 가장자리의 테이블 좌표 y (m) (환경 충돌률의 팔꿈치–테이블 부분)")
+    r.add_argument("--table-outline", default=str(TABLE_OUTLINE),
+                   help="태스크별 테이블 윗면 윤곽 타원 (환경 충돌률의 팔꿈치–테이블 부분, metrics/table_outline.py로 구함)")
     r.add_argument("--out", required=True, help="출력 폴더 (~/project 밖, 예: ~/out/신서연/metrics)")
     r.add_argument("--algos", nargs="*", help="계산할 알고리즘 폴더 이름 (기본: --retarget 아래 있는 것 모두)")
     r.add_argument("--ids", nargs="*", help="이 에피소드만 (시험용)")
