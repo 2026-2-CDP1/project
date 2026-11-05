@@ -209,6 +209,34 @@ def triangulate(frame_clicks, hands_uv, cams, wc_name, max_px):
     return (X, e) if n >= 2 else (None, e)
 
 
+def manual_track(frames, start, t, wc_uv, no3d, cams, side, max_px, max_interp):
+    """찍은 값 -> 손목 3D. frames = wrist_clicks.json 의 한 에피소드, wc_uv = 작업 손 쪽 카메라 손목 (T,2).
+    반환: out (T,3), mask (T,) 1 = 찍은 프레임 2 = 사이를 보간, errs = 확인용 프레임의 3D (i, X) 목록, 재투영 탈락 수."""
+    T = len(t)
+    out, mask, checks, rej = np.full((T, 3), np.nan), np.zeros(T, np.uint8), [], 0
+    pts = {}
+    for fs, v in frames.items():
+        i = int(fs) - start
+        if v.get("none") or not v["clicks"] or not 0 <= i < T:      # 구간이 바뀌어도 그 안의 값만 쓴다
+            continue
+        X, _ = triangulate(v["clicks"], wc_uv[i], cams, side, max_px)
+        if X is None:
+            rej += 1
+        elif no3d[i]:
+            pts[i] = X
+        else:
+            checks.append((i, X))
+    keys = sorted(pts)
+    for i in keys:
+        out[i], mask[i] = pts[i], 1
+    for p, q in zip(keys, keys[1:]):
+        if q - p <= max_interp:
+            w = (t[p + 1:q] - t[p]) / (t[q] - t[p])
+            out[p + 1:q] = pts[p] + w[:, None] * (pts[q] - pts[p])
+            mask[p + 1:q] = 2
+    return out, mask, checks, rej
+
+
 def cmd_apply(a):
     from io_utils import find_calib
     from multiview import DEFAULT_TRI, load_calibs
@@ -222,31 +250,11 @@ def cmd_apply(a):
         cams, _ = load_calibs(json.load(open(find_calib(a.calib_dir, eid))))
         uv2, raw = np.load(ep / "keypoints_2d.npy"), np.load(ep / "keypoints_raw.npy")
         t = np.loadtxt(ep / "exo_ts.csv", skiprows=1)
-        wc = cams_order.index(side)
         no3d = np.isnan(raw[:, WRIST]).any(axis=1)
-        T = len(t)
-        out, mask, errs, rej = np.full((T, 3), np.nan), np.zeros(T, np.uint8), [], 0
-        pts = {}
-        for fs, v in clicks[eid].items():
-            i = int(fs) - s
-            if v.get("none") or not v["clicks"] or not 0 <= i < T:      # 구간이 바뀌어도 그 안의 값만 쓴다
-                continue
-            X, _ = triangulate(v["clicks"], uv2[wc, i, WRIST], cams, side, a.max_px or DEFAULT_TRI["max_reproj_px"])
-            if X is None:
-                rej += 1
-                continue
-            if no3d[i]:
-                pts[i] = X
-            else:
-                errs.append(np.linalg.norm(X - raw[i, WRIST]) * 100)
-        keys = sorted(pts)
-        for i in keys:
-            out[i], mask[i] = pts[i], 1
-        for p, q in zip(keys, keys[1:]):
-            if q - p <= a.max_interp:
-                w = (t[p + 1:q] - t[p]) / (t[q] - t[p])
-                out[p + 1:q] = pts[p] + w[:, None] * (pts[q] - pts[p])
-                mask[p + 1:q] = 2
+        out, mask, checks, rej = manual_track(clicks[eid], s, t, uv2[cams_order.index(side), :, WRIST], no3d, cams, side,
+                                              a.max_px or DEFAULT_TRI["max_reproj_px"], a.max_interp)
+        errs = [np.linalg.norm(X - raw[i, WRIST]) * 100 for i, X in checks]
+        keys = np.flatnonzero(mask == 1).tolist()
         np.save(ep / "wrist_manual.npy", out)
         np.save(ep / "wrist_manual_mask.npy", mask)
         allerr += errs

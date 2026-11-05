@@ -75,7 +75,7 @@
 
 - **보정은 태스크 단위예요.** 태스크마다 카메라를 다시 설치해서, 각 태스크 에피소드는 그 태스크의 `T{n}_check`로 만든 `sync/exo_calib_T{n}.json`을 써요.
 - **카메라 간 시간 맞추기**는 `sync/sync.csv`를 써요 (`sync/README.md`).
-- **프레임 수가 시점마다 달라요.** exo_front는 약 60 fps, 나머지는 약 30 fps예요. 시점 간 대응은 프레임 번호가 아니라 `data.jsonl`의 시각으로 맞춰요.
+- **프레임 수가 시점마다 달라요.** exo_front는 T1·T3 약 60 fps, T2 30 fps이고 나머지는 약 30 fps예요. 시점 간 대응은 프레임 번호가 아니라 `data.jsonl`의 시각으로 맞춰요.
 
 ## 6. 파일 형식
 
@@ -83,7 +83,7 @@
 
 ### `data.mov` - 영상
 
-- 1920×1440, RGB. exo_front 약 60 fps, ego·exo_left·exo_right 약 30 fps
+- 1920×1440, RGB. exo_front T1·T3 약 60 fps, T2 30 fps / ego·exo_left·exo_right 약 30 fps
 - 소리는 없어요(앱이 녹음하지 않음).
 
 ### `data.jsonl` - 프레임 시각 + IMU 센서

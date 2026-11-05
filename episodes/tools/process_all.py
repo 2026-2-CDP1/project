@@ -72,6 +72,8 @@ def run_one(job):
                "--notes", "박수 사이 임시 구간" + (", 예비 (split 미정)" if reserve else "")]
         if not a.copy_video:
             cmd.append("--link-video")
+        if Path(a.wrist_clicks).exists():
+            cmd += ["--wrist-clicks", a.wrist_clicks]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode:
             row["error"] = (r.stderr or r.stdout).strip().splitlines()[-1]
@@ -92,6 +94,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     ap.add_argument("--copy-video", action="store_true", help="영상을 복사 (기본은 원본 링크)")
     ap.add_argument("--redo", action="store_true")
+    ap.add_argument("--wrist-clicks", default=str(Path(__file__).resolve().parent.parent / "wrist_clicks.json"))
     a = ap.parse_args()
 
     claps, rec = clap_frames(a.sync), read_records(a.records)

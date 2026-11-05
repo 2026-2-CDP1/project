@@ -26,6 +26,7 @@ from multiview import load_calibs, align_to_ref, triangulate_series, tri_report,
 from constants import TASKS, CASES, SPLITS
 from io_utils import read_frame_times, find_video, find_episode_folder, read_sync_row, kp_cache_path, match_frames, SyncError
 from quality import correct, settings_string
+from wrist_click import manual_track
 
 
 def main():
@@ -47,6 +48,7 @@ def main():
     ap.add_argument("--mirrored", action="store_true", help="입력 영상이 좌우 반전된 경우")
     ap.add_argument("--cache", help="extract_all.py 의 --out (있는 카메라는 영상 대신 이걸 읽음)")
     ap.add_argument("--notes", default="")
+    ap.add_argument("--wrist-clicks", help="사람이 찍은 손목 (episodes/wrist_clicks.json). 3D 가 빈 프레임의 손목만 채운다")
     ap.add_argument("--link-video", action="store_true", help="영상을 복사하지 않고 원본에 심볼릭 링크 (시험용, 용량 절약)")
     a = ap.parse_args()
 
@@ -106,8 +108,25 @@ def main():
     # 8단계: 보정 (한 번만)
     kp, report, st = correct(kp_raw, fps)
 
+    # 사람이 찍은 손목 (keypoints_raw 는 그대로, keypoints 의 빈 프레임만 채움). 보정(correct) 뒤에 넣어 찍은 값을 바꾸지 않는다
+    source = np.where(np.isnan(kp).any(axis=2), "none", "auto").astype("U6")      # (T,K) 키포인트별 출처
+    wrist_mask = None
+    if a.wrist_clicks:
+        frames = json.load(open(Path(a.wrist_clicks).expanduser())).get(a.id, {})
+        if frames:
+            w = ex.EXO_NAMES.index("wrist")
+            empty = np.isnan(kp[:, w]).any(axis=1)
+            X, wrist_mask, _, rej = manual_track(frames, a.start, t_ref, uv_views[names.index(a.hand), :, w], empty,
+                                                 {c: cams[c] for c in names}, a.hand, tri_st["max_reproj_px"], 30)
+            fill = empty & (wrist_mask > 0)
+            kp[fill, w] = X[fill]
+            source[fill, w] = "manual"
+            report["manual_wrist"] = {"clicked": int((wrist_mask == 1).sum()), "interpolated": int((wrist_mask == 2).sum()),
+                                      "rejected": rej, "missing_after_manual": round(float(np.isnan(kp[:, w]).any(axis=1).mean()), 4)}
+
     # 6단계: 손목 자세 (보정된 키포인트 기준)
     wrist_pose = wrist_pose_series(kp, ex.EXO_NAMES)
+    wrist_pose[source[:, ex.EXO_NAMES.index("wrist")] == "manual", 3:] = np.nan   # 찍은 손목은 위치만. 방향은 만들지 않는다
 
     # 4·5단계: ego 거리 -> 기준 시간축
     t_ego = read_frame_times(folder["ego"])
@@ -122,6 +141,9 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     np.save(out / "keypoints_raw.npy", kp_raw)
     np.save(out / "keypoints.npy", kp)
+    np.save(out / "keypoint_source.npy", source)         # (T,K) "auto" / "manual" / "none", 순서 = keypoint_names.json
+    if wrist_mask is not None:
+        np.save(out / "wrist_manual_mask.npy", wrist_mask)   # (T,) 1 = 찍은 프레임, 2 = 사이를 보간 (source 는 둘 다 manual)
     np.save(out / "wrist_pose.npy", wrist_pose)
     np.save(out / "pinch_dist.npy", pinch)
     np.save(out / "keypoints_2d.npy", uv_views)          # (C,T,K,2) 기준 시간축, 카메라 순서 = meta.cameras
