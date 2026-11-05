@@ -89,7 +89,9 @@ class MinkIK:
         return q, sat, status, pe, re, swv, it
 
 
-def run_episode(solver, targets, q_start=common.Q_HOME):
+def run_episode(solver, targets, q_start=common.Q_HOME, restart_tol=0.0):
+    """restart_tol > 0 이면: 직전 자세에서 푼 손목 위치 오차가 restart_tol(m)보다 크면 home 에서 한 번 더 풀고
+    더 나은 쪽(common.task_score)을 고른다 (A와 같은 규칙). 두 번 푼 시간 모두 time_ms 에 포함."""
     T = len(targets["valid"])
     E_goal = common.elbow_goals(targets)
     q_out = np.zeros((T, 7))
@@ -100,6 +102,7 @@ def run_episode(solver, targets, q_start=common.Q_HOME):
     time_ms = np.full(T, np.nan)   # 프레임당 IK 시간 (solve 호출만, 목표 없는 프레임은 NaN)
     elbow_used = np.zeros(T, bool)  # 사람 팔꿈치를 목표로 쓴 프레임
     n_prev = None                   # 직전 프레임 로봇 팔꿈치 방향 (어깨-손목 축 기준)
+    restarted = np.zeros(T, bool)   # home 에서 다시 푼 결과를 쓴 프레임
     q = np.asarray(q_start, float).copy()
     for t in range(T):
         if targets["valid"][t]:
@@ -114,16 +117,21 @@ def run_episode(solver, targets, q_start=common.Q_HOME):
                 W_des = targets["pos"][t] - common.WRIST_TO_FLANGE * targets["rot"][t][:, 2]
                 E = common.robot_elbow_target(common.IIWA_SHOULDER, W_des, n_prev)
             t0 = time.perf_counter()
-            q, sat_out[t], status[t], pos_err[t], rot_err[t], swv_err[t], iters[t] = solver.solve(
-                q, targets["pos"][t], targets["rot"][t], E, n_h)
+            res = solver.solve(q, targets["pos"][t], targets["rot"][t], E, n_h)
+            if restart_tol > 0 and not res[3] <= restart_tol:
+                res2 = solver.solve(np.asarray(q_start, float), targets["pos"][t], targets["rot"][t], E, n_h)
+                if common.task_score(res2[3], res2[4]) < common.task_score(res[3], res[4]):
+                    res, restarted[t] = res2, True
             time_ms[t] = 1000 * (time.perf_counter() - t0)
+            q, sat_out[t], status[t], pos_err[t], rot_err[t], swv_err[t], iters[t] = res
+            solver.cfg.update(q)            # 다시 푼 경우에도 고른 자세 기준으로 팔꿈치 방향을 잼
             d = solver.cfg.data
             n_prev = common.elbow_direction(common.IIWA_SHOULDER, d.xpos[solver.eid].copy(), d.xpos[solver.wid].copy())
         q_out[t] = q
     solved = np.flatnonzero(status != common.STATUS_NO_TARGET)
     if len(solved):
         q_out[:solved[0]] = q_out[solved[0]]
-    return q_out, sat_out, status, pos_err, rot_err, swv_err, iters, time_ms, elbow_used
+    return q_out, sat_out, status, pos_err, rot_err, swv_err, iters, time_ms, elbow_used, restarted
 
 
 def main():
@@ -138,6 +146,8 @@ def main():
     ap.add_argument("--base-z", type=float, default=0.0, help="베이스를 위(+)·아래(-)로 옮길 거리 m")
     ap.add_argument("--pos-only", default="hold", choices=common.POS_ONLY_MODES,
                     help="손목 위치만 있고 방향이 없는 프레임: hold=직전 방향 유지 / skip=목표 없음")
+    ap.add_argument("--restart-tol", type=float, default=0.0,
+                    help="손목 위치 오차가 이 값(m)보다 크면 home 에서 다시 풀어 나은 쪽 선택 (0 = 끔)")
     ap.add_argument("--brief", action="store_true", help="결과를 한 줄로만 출력")
     for k, v in DEFAULT.items():
         ap.add_argument(f"--{k.replace('_', '-')}", type=type(v), default=v)
@@ -151,17 +161,19 @@ def main():
                     a.tol_pos, a.tol_rot, a.tol_step, a.sat_eps)
 
     t0 = time.time()
-    q, sat, status, pos_err, rot_err, swv_err, iters, time_ms, elbow_used = run_episode(solver, targets)
+    q, sat, status, pos_err, rot_err, swv_err, iters, time_ms, elbow_used, restarted = run_episode(
+        solver, targets, restart_tol=a.restart_tol)
     sec = time.time() - t0
 
     eid = ep["meta"]["episode_id"]
     path = common.save_result(Path(a.out) / "B_mink" / f"{eid}.npz", q, sat, status, pos_err, targets,
                               rot_error=rot_err, swivel_error=swv_err, iters=iters, time_ms=time_ms,
-                              elbow_used=elbow_used)
+                              elbow_used=elbow_used, restarted=restarted)
     info = targets["info"]
     if a.brief:
-        label = f"B {a.mount:4s} {a.anchor:8s} z{a.base_z:+.1f} {a.r_off:6s} w={a.w_elbow:<4}"
-        print(common.brief_line(label, q, sat, status, pos_err, rot_err, swv_err, info) + " | " + common.timing_text(time_ms))
+        label = f"{eid} B w={a.w_elbow:<4} it={a.max_iter:<4} rs={a.restart_tol:<5}"
+        print(common.brief_line(label, q, sat, status, pos_err, rot_err, swv_err, info) + " | " + common.timing_text(time_ms)
+              + f" | 위치최대 {1000 * np.nanmax(pos_err):.0f} mm, 1cm초과 {int(np.nansum(pos_err > 0.01))} | 재시작 {int(restarted.sum())}")
         return
     print(f"{eid} hand={info['hand']} scale={info['scale']:.3f} r_off={a.r_off} anchor={a.anchor} w_elbow={a.w_elbow}")
     print(common.summarize("B_mink", q, sat, status, pos_err, rot_err, sec))

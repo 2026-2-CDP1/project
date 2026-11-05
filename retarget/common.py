@@ -108,6 +108,12 @@ def to_robot_point(p_table, info):
     return (info["scale"] * (p - src)) @ R.T + dst
 
 
+def task_score(pos_err, rot_err):
+    """손목 목표를 얼마나 못 맞췄는지 한 숫자로 (m + 0.1 m/rad × rad). 재시작 결과 비교용. NaN이면 무한대."""
+    s = pos_err + 0.1 * rot_err
+    return s if np.isfinite(s) else np.inf
+
+
 def to_table_point(p_base, info):
     """to_robot_point 의 역변환: 로봇 베이스 좌표 점 -> 테이블 좌표 (m). (예: 5-2 팔꿈치–테이블 판정)"""
     p = np.asarray(p_base, dtype=float)
