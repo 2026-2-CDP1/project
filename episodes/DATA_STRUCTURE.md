@@ -243,6 +243,8 @@ ego는 오른손 / 왼손 순서예요.
 
 - 구간 이름은 `approach → grasp → transport → release → retreat` 순서예요. 앞 구간의 `end + 1`이 다음 구간의 `start`예요.
 - 구간 안의 상대 번호가 필요하면 `grasp_frame - exo_start_frame`처럼 빼서 써요.
+- 지금 결과(`episodes_v4`)는 `grasp_frame`만 표시해서 `segments`가 `[]`예요.
+- `grasp_frame`은 `null`일 수 있어요. 쥔 순간이 구간 밖이라서 그래요 (T2 74개 전부). 빼기 전에 `null`인지 먼저 확인하세요.
 
 ## 5. 미정 사항
 
