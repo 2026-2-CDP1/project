@@ -1,7 +1,7 @@
 """에피소드별 프레임 판정을 작은 JSON 하나로 (결과 문서의 '실패 구간' 화면용).
 
 프레임마다 한 글자:
-  알고리즘 줄 (A·B·C): "." 성공 (1 cm · 5° · 한계 안)  "x" 실패  "-" 목표 없음(손목 미검출)
+  알고리즘 줄 (A·B·C): "." 성공 (0.5 cm · 1° · 한계 안, common.SUCCESS_*)  "x" 실패  "-" 목표 없음(손목 미검출)
   할 수 없는 목표 줄:   " " 할 수 있음  "f" 안 닿음(> 0.82 m)  "n" 너무 가까움(< 0.41 m)  "o" 방향·관절 한계  "-" 목표 없음
   (할 수 없는 목표 = C가 정확한 해를 못 찾은 프레임, check_feasible.py 와 같은 기준)
 영상 위치: exo_start_frame(3번 meta.json) + 프레임 번호, exo_fps 로 초 환산.
@@ -17,8 +17,10 @@ from pathlib import Path
 
 import numpy as np
 
+import common  # noqa: E402  (같은 retarget 폴더, 성공 판정 기준)
+
 ALGOS = ("A_DLS", "B_mink", "C_eaik")
-POS_TOL, ROT_TOL, LIM_EPS = 0.01, np.radians(5.0), 1e-6
+POS_TOL, ROT_TOL, LIM_EPS = common.SUCCESS_POS_M, np.radians(common.SUCCESS_ROT_DEG), 1e-6   # main 에서 --pos-tol-cm 등으로 덮어씀
 
 
 def main():
@@ -27,7 +29,11 @@ def main():
     ap.add_argument("--episodes", required=True)
     ap.add_argument("--records", default="~/project/episodes/records.csv")
     ap.add_argument("--limits", default="~/project/robot/joint_limits.csv")
+    common.add_success_args(ap)
     a = ap.parse_args()
+    global POS_TOL, ROT_TOL
+    POS_TOL, ROT_TOL = common.success_tols(a)
+    print(f"판정 기준: {common.success_text(a)}")
     out, epr = Path(a.out).expanduser(), Path(a.episodes).expanduser()
     lim = list(csv.DictReader(open(Path(a.limits).expanduser(), encoding="utf-8")))
     lo, hi = np.array([float(r["lower_rad"]) for r in lim]), np.array([float(r["upper_rad"]) for r in lim])

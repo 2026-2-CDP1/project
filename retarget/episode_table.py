@@ -1,6 +1,6 @@
 """에피소드별 A·B·C 성공률 비교표 (check_success.py 가 만든 success_by_episode.csv 를 옆으로 펼침).
 
-판정 (에피소드 성공률 기준, 5-2 프레임 판정: 1 cm · 5° · 한계 안):
+판정 (에피소드 성공률 기준, 프레임 판정은 check_success.py 실행 때 기준 (기본 0.5 cm · 1° · 한계 안)):
   O  성공률 ≥ 90%      △  50% 이상 90% 미만      X  50% 미만
 
 사용 (서버, source ~/use_robot.sh 후, check_success.py 를 먼저 실행):

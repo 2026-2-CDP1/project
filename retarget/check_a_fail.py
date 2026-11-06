@@ -18,7 +18,9 @@ from pathlib import Path
 
 import numpy as np
 
-POS_TOL, ROT_TOL, LIM_EPS = 0.01, np.radians(5.0), 1e-6
+import common  # noqa: E402  (같은 retarget 폴더, 성공 판정 기준)
+
+POS_TOL, ROT_TOL, LIM_EPS = common.SUCCESS_POS_M, np.radians(common.SUCCESS_ROT_DEG), 1e-6   # main 에서 --pos-tol-cm 등으로 덮어씀
 
 
 def runs(mask):
@@ -39,7 +41,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--limits", default="~/project/robot/joint_limits.csv")
+    common.add_success_args(ap)
     a = ap.parse_args()
+    global POS_TOL, ROT_TOL
+    POS_TOL, ROT_TOL = common.success_tols(a)
+    print(f"판정 기준: {common.success_text(a)}")
     out = Path(a.out).expanduser()
     lim = list(csv.DictReader(open(Path(a.limits).expanduser(), encoding="utf-8")))
     lo, hi = np.array([float(r["lower_rad"]) for r in lim]), np.array([float(r["upper_rad"]) for r in lim])

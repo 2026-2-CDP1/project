@@ -266,6 +266,25 @@ def robot_elbow_target(S_r, W_r, n_h):
 
 WRIST_TO_FLANGE = 0.081 + 0.045   # 손목 중심 -> 플랜지, 플랜지 z축 방향 (robot.urdf joint7, ee)
 
+# 결과 분석의 프레임 성공 판정: 손목(TCP) 위치 ≤ SUCCESS_POS_M, 방향 ≤ SUCCESS_ROT_DEG, 모든 관절이 한계 안.
+# 2026-11-06 팀 결정 1 cm · 5° → 0.5 cm · 1° (근사해가 기준 안에 들어와 성공으로 세지는 문제). 5-2 정의서 2.1 과 맞출 것.
+# 분석 스크립트(check_*.py, export_frames.py)가 이 값을 기본으로 쓰고 --pos-tol-cm, --rot-tol-deg 로 바꿀 수 있다.
+SUCCESS_POS_M, SUCCESS_ROT_DEG = 0.005, 1.0
+
+
+def add_success_args(ap):
+    ap.add_argument("--pos-tol-cm", type=float, default=100 * SUCCESS_POS_M, help="성공 판정 손목 위치 기준 (cm)")
+    ap.add_argument("--rot-tol-deg", type=float, default=SUCCESS_ROT_DEG, help="성공 판정 손목 방향 기준 (도)")
+
+
+def success_tols(a):
+    """argparse 결과 -> (위치 기준 m, 방향 기준 rad)."""
+    return a.pos_tol_cm / 100.0, float(np.radians(a.rot_tol_deg))
+
+
+def success_text(a):
+    return f"손목 {a.pos_tol_cm:g} cm · {a.rot_tol_deg:g}° · 한계 안"
+
 
 def elbow_goals(targets):
     """프레임마다 로봇 팔꿈치 목표 위치 (T,3). 손목 중심 목표 = TCP 목표 - 0.126 m × 플랜지 z.
