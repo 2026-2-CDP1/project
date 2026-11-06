@@ -246,6 +246,7 @@ source ~/use_openvla.sh      # 매번. ~/.bashrc 의 LD_LIBRARY_PATH(CUDA 12 cuD
 | 학습 데이터 | 알고리즘 **C(EAIK)** 결과 1개로 1회 | 리타게팅 시험에서 C가 가장 좋아 보임. 근거는 지표 결과가 나오면 확인해 기록 |
 | 데이터 형식 | **RLDS** (`knu_retarget`) | OpenVLA 공식 학습 코드(`vla-scripts/finetune.py`)가 `RLDSDataset`만 읽음. 10/16 멘토가 말한 LeRobot은 쓰지 않고, 대신 observation·action·state 키가 빠지지 않는지 변환 때 점검 |
 | 행동 (action) | **다음 스텝의 7관절 각도** `q[t+1]` (rad, 7개) | C 결과(`q`)를 변환 없이 정답으로 씀. 7관절이라 그리퍼 자리 없이 7개가 맞음. 예측값을 `replay()`로 바로 재생·평가 |
+| OpenVLA 코드 수정 | 행동 형식 `JOINT_POS_ABS`(관절각 7개, 그리퍼 없음, 7개 모두 정규화) 추가 + 데이터셋 `knu_retarget` 등록. `prismatic/vla/datasets/rlds/oxe/`의 `configs.py`·`transforms.py`·`materialize.py` | OpenVLA 로더는 손끝 형식(`EEF_POS`·`EEF_R6`)만 받음. 손끝 형식으로 등록하면 마지막 값을 그리퍼로 보고 정규화를 건너뛰어 7번 관절(±3.05 rad)이 −1~1 밖에서 잘림. 데이터셋 등록(`configs.py`·`transforms.py`)은 원래 필요한 작업(역할 가이드 7번) |
 | 상태 (state) | 현재 7관절 각도 `q[t]` | RLDS 형식상 기록 (OpenVLA 입력에는 안 씀) |
 | 이미지 | **exo_front** 1장 | C 결과의 시간축이 exo_front라 프레임을 그대로 짝지음. 장면 전체가 보이고 손 놓친 비율이 낮음 (ego는 49~65%) |
 | 프레임 간격 | **10 Hz** (T1·T3 60 fps는 6장마다, T2 30 fps는 3장마다 1장) | OpenVLA 사전학습 데이터 대부분이 3~20 Hz. 앞뒤 장면이 거의 같은 30~60 Hz는 다음 행동을 배울 거리가 적음 |
