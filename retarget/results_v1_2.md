@@ -85,3 +85,28 @@
 - SEW로 직접 푼 프레임 71.5%, 그중 사람 SEW 각 그대로 풀린 것은 3,449프레임뿐. 보통 25°(95%: 55°) 벗어나야 관절 한계 안 해가 있음 (사람은 팔꿈치를 내리지만 iiwa 2번 관절 ±120°).
 - 두 방식 모두 "한계 안에서 사람 SEW와 가장 가까운 자세"로 가서 결과가 같음. 격자는 0.1°까지 다듬어 한계에 딱 붙은 해를, SEW 고정은 1°씩 벌리다 처음 들어온 해(한계에서 최대 1° 안쪽)를 골라 한계에 붙는 비율이 다름. 이 차이는 원리보다 탐색 간격에서 옴.
 - 한계에 붙은 관절은 학습 데이터(7번, PR #51 "C 2번 관절 38% 한계")와 실제 로봇(넘치면 정지)에 불리. 미리 정한 기준(① 결과 같음 → ② 한계에 덜 붙는 쪽)으로는 SEW 고정.
+
+## 6. 정할 것
+
+| 항목 | 선택지 | 4번 의견 |
+|---|---|---|
+| C 본 결과 | ① 격자 그대로 ② SEW 고정 (기준대로) ③ **격자 + 관절 한계 마진** (세 알고리즘 모두 한계를 예: 2° 안쪽으로, 성공 판정은 실제 한계) | ③: 한계 여유를 일부러 정한 값으로 두고 격자 속도 유지. SEW 고정은 멘토 제안 시험 결과로 보고. 사후 변경이라 근거(PR #51, 로봇 안전 마진) 기록 |
+| 할 수 없는 목표 정의 | C 결과 기준 / 거리 기준 (0.41~0.82 m 밖) | 거리 기준 (C 100%가 정의에 기대지 않게) |
+| 재생 속도 | 영상 속도 / 시간 늘리기 | 늘리기 (5-1·5-2와) |
+| 멘토 보고 | 기존 그대로(A·B 손목만), A 실패 원인과 clamp, C SEW 시험, 할 수 없는 목표 28%, 속도 | |
+
+## 파일
+
+| 폴더 (`results/`) | 내용 |
+|---|---|
+| `v1_2/` | 본 실행: summary_<알고리즘>.csv, run_info_<작업>.json, success_by_episode·success_table·feasible_by_episode·where_by_episode.csv |
+| `v1_2_Aclamp/` | A clamp (B·C 열은 본 실행과 같음) |
+| `v1_2_Csew/` | C SEW 고정 (A·B 열은 본 실행과 같음) |
+
+```bash
+O=~/out/hyojeong/retarget/v1_2    # 서버, source ~/use_robot.sh 후, ~/project 에서
+python retarget/check_success.py --out $O && python retarget/episode_table.py --out $O --quiet
+python retarget/check_feasible.py --out $O && python retarget/check_where.py --out $O
+python retarget/check_speed.py --out $O && python retarget/check_a_fail.py --out $O
+python retarget/compare_runs.py --root ~/out/hyojeong/retarget --ref v1_2     # 4·5절 비교표
+```
