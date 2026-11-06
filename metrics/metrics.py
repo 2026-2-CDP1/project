@@ -15,7 +15,7 @@ GPU는 필요 없다 (렌더링 없이 mj_forward만). 서버에서는 source ~/
                                               time_ms (T,, 목표 없음 = NaN), elbow_used (T,), info (JSON: 좌표 변환 값)
                                               [, pos_err, rot_err]                                              ← 4번
     <episodes>/<에피소드ID>/                   keypoints.npy (T,7,3), keypoint_names.json, exo_ts.csv,
-                                              meta.json, labels.json                                ← 3번
+                                              meta.json [, labels.json — 사람이 파지 프레임을 채운 뒤에 생김]  ← 3번
 """
 import argparse
 import csv
@@ -465,7 +465,9 @@ def run(a):
             d = ep_root / ep
             try:
                 res = dict(np.load(npz))
-                meta, labels = read_json(d / "meta.json"), read_json(d / "labels.json")
+                meta = read_json(d / "meta.json")
+                # labels.json은 3번 처리 뒤 사람이 따로 채우는 파일이라 없을 수 있다 → 파지점 거리만 NaN, 나머지는 계산
+                labels = read_json(d / "labels.json") if (d / "labels.json").exists() else None
                 ts = read_ts(d / "exo_ts.csv")
                 kp = np.load(d / "keypoints.npy")
                 names = read_json(d / "keypoint_names.json")
@@ -484,8 +486,9 @@ def run(a):
                 human_sew = tuple(map_points(to_robot, kp[:, names.index(n)])
                                   for n in ("shoulder", "elbow", "wrist"))
                 g = p_human = None
-                if labels.get("grasp_frame") is not None:
-                    g = int(labels["grasp_frame"]) - int(labels["exo_start_frame"])
+                if labels and labels.get("grasp_frame") is not None:
+                    start = labels.get("exo_start_frame", meta.get("exo_start_frame"))
+                    g = int(labels["grasp_frame"]) - int(start)
                     if 0 <= g < len(kp):
                         p = human_grasp_point(kp, names, g)
                         p_human = None if p is None else to_robot(p)
@@ -493,6 +496,8 @@ def run(a):
                 table = (to_robot, outline) if outline else None
                 m, info = episode_metrics(res, lo, hi, vmax, ts, replayer, g, p_human, human_sew,
                                           has_obstacles=obstacles is not None, table=table)
+                if labels is None:
+                    info["grasp_note"] = "labels.json 없음 (파지 프레임 라벨 전)"
             except Exception as e:  # 실패를 지우지 않음: 어떤 에피소드가 왜 안 됐는지 남긴다
                 info_rows.append({**base, "status": f"오류: {e}"})
                 print(f"[오류] {algo} {ep}: {e}")
