@@ -35,8 +35,8 @@ TCP_SITE = "attachment_site"
 ELBOW_BODY, WRIST_BODY = "link4", "link6"   # 원점 = 팔꿈치 / 손목 중심
 # posture·damping은 아주 작게: 가중치 합 방식이라 posture가 크면 TCP를 mm 단위로 끌어당겨 수렴 기준(0.1 mm)을 못 넘음.
 # QP가 매 반복 최소점을 정확히 풀기 때문에, 다른 목표가 없는 남는 자유도에서는 작은 가중치로도 home 쪽으로 충분히 움직임
-# w_elbow 0.1: 팀 결정, A·B·C 모두 사람 팔꿈치를 입력으로 (0이면 끔). 0.5는 손목이 34 mm 밀려 0.1로 (T1_E004 시험)
-DEFAULT = {"w_elbow": 0.1, "posture": 1e-6, "damping": 1e-8, "lm_damping": 1.0, "max_iter": 100,
+# w_elbow 0: 기존 알고리즘 그대로 손목만 (v1.2). v1.1은 0.1 (팔꿈치 입력, 0.5는 손목이 34 mm 밀려 0.1로)
+DEFAULT = {"w_elbow": 0.0, "posture": 1e-6, "damping": 1e-8, "lm_damping": 1.0, "max_iter": 100,
            "tol_pos": 1e-4, "tol_rot": 1e-3, "tol_step": 1e-5, "sat_eps": 1e-3}
 
 
