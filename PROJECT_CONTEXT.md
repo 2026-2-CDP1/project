@@ -107,7 +107,7 @@ exit
 | 비교 알고리즘 | A DLS / B mink / C **EAIK** (2026-11-04: C를 IK-Geo → EAIK, D PyRoki 제외) |
 | 팔꿈치 입력 | **A·B·C 모두 사람 팔꿈치(팔 회전각)를 입력** (2026-11-05, T10). 안 보인 프레임은 직전 팔꿈치 유지 → `retarget/README.md` |
 | 패키지 설치 | 서버 `robot` 환경 패키지는 **필요할 때 담당자가 직접 설치** (2026-11-05). 절차는 5절 |
-| 학습 모델 | OpenVLA-7B + LoRA, 대표 알고리즘 1개 데이터로 1회 |
+| 학습 모델 | OpenVLA-7B + LoRA, **알고리즘 C(EAIK) 데이터로 1회** (2026-11-06). 데이터 형식 **RLDS**, max_steps **20,000**, 평가는 기존 계획 유지 → 5절 「OpenVLA 학습」 |
 | 코드 관리 | GitHub `2026-2-CDP1/project`, 브랜치 → PR → main |
 
 ---
@@ -228,6 +228,33 @@ cd ~/project && python replay/replay.py --check --out ~/out/본인이름/replay_
 ```
 - **`pip` 대신 `python -m pip`**: `(base)` 상태나 PATH 순서 때문에 그냥 `pip`은 홈 폴더 옛 가상환경(`~/bin/pip`)에 설치될 수 있음 (2026-11-05 실제로 발생, 되돌림)
 - 설치 후 위 패키지 표에 버전을 적고 팀 채팅에 알립니다. 버전은 `==`로 고정합니다
+
+### OpenVLA 학습 (7번, `openvla` 환경, 2026-11-06)
+`robot` 환경과 **별도**의 conda 환경. 공유 `robot` 환경은 건드리지 않음.
+```bash
+source ~/use_openvla.sh      # 매번. ~/.bashrc 의 LD_LIBRARY_PATH(CUDA 12 cuDNN)를 비워 PyTorch(cu118)와 충돌을 막음
+```
+- 설치 스크립트 `~/vla/setup_openvla.sh`, OpenVLA 코드 `~/vla/openvla` (commit `c8f03f4`), 모델 `~/vla/models/openvla-7b`
+- 버전 (역할 가이드 7번의 검증된 버전과 동일): torch 2.2.0+cu118, torchvision 0.17.0, transformers 4.40.1, tokenizers 0.19.1, timm 0.9.10, peft 0.11.1, flash-attn 2.5.5, tensorflow 2.15.0, tensorflow-datasets 4.9.3. 전체 목록 `~/out/guhyeon/openvla_env_freeze.txt`
+  - 설치 중 맞춘 것: `tensorflow-metadata` 1.14.0 (최신 1.21은 TF 2.15와 충돌), 그에 맞춰 protobuf 3.20.3, `wandb` 0.16.6
+- Slurm 제출은 **bash 스크립트로** (`sbatch ... script.sh`). `--wrap "source ..."`은 sh로 실행돼 환경이 안 켜짐
+- 학습 기록은 wandb offline (`WANDB_MODE=offline`, `~/vla/openvla/wandb/`)
+
+**결정 (2026-11-06)**
+| 항목 | 결정 | 이유 |
+|---|---|---|
+| 학습 데이터 | 알고리즘 **C(EAIK)** 결과 1개로 1회 | 리타게팅 시험에서 C가 가장 좋아 보임. 근거는 지표 결과가 나오면 확인해 기록 |
+| 데이터 형식 | **RLDS** (`knu_retarget`) | OpenVLA 공식 학습 코드(`vla-scripts/finetune.py`)가 `RLDSDataset`만 읽음. 10/16 멘토가 말한 LeRobot은 쓰지 않고, 대신 observation·action·state 키가 빠지지 않는지 변환 때 점검 |
+| 행동 (action) | **다음 스텝의 7관절 각도** `q[t+1]` (rad, 7개) | C 결과(`q`)를 변환 없이 정답으로 씀. 7관절이라 그리퍼 자리 없이 7개가 맞음. 예측값을 `replay()`로 바로 재생·평가 |
+| 상태 (state) | 현재 7관절 각도 `q[t]` | RLDS 형식상 기록 (OpenVLA 입력에는 안 씀) |
+| 이미지 | **exo_front** 1장 | C 결과의 시간축이 exo_front라 프레임을 그대로 짝지음. 장면 전체가 보이고 손 놓친 비율이 낮음 (ego는 49~65%) |
+| 프레임 간격 | **10 Hz** (T1·T3 60 fps는 6장마다, T2 30 fps는 3장마다 1장) | OpenVLA 사전학습 데이터 대부분이 3~20 Hz. 앞뒤 장면이 거의 같은 30~60 Hz는 다음 행동을 배울 거리가 적음 |
+| 지시문 | T1 `pick up the cup` / T2 `stack the block` / T3 `move the block` (변환 때 확정) | 태스크마다 한 문장 |
+| 학습 설정 | LoRA rank 32, 배치 8 × 누적 2 (유효 16), lr 5e-4, `image_aug True`, max_steps 20,000, save_steps 2,000, `--save_latest_checkpoint_only False` | 가이드 4단계 값. 배치는 시험 학습 최대 메모리 39.8 GB로 확인 |
+| 저장 | 체크포인트 `~/out/guhyeon/runs/` (개당 약 15 GB × 10개 ≈ 150 GB), 레포 `runs/`에는 설정·로그만 | 산출물은 `~/project` 밖 |
+
+- **시험 학습 (가이드 1단계, LIBERO `libero_spatial_no_noops` 200스텝):** 손실 12.0 → 약 3.0, 행동 정확도 13% → 약 40%, 최대 메모리 39.8 GB, 스텝당 약 2.9초 (20,000스텝 ≈ 16시간 + 저장 시간). 스크립트 `~/vla/smoke_libero.sh`
+- `image_aug True`로 학습하므로 **추론 때 영상 가운데를 잘라 넣어야 함** (8번 평가에 전달)
 
 ---
 
@@ -351,13 +378,15 @@ project/
 - [x] 1번 로봇 셋업: iiwa14 URDF·MJCF 확보, 관절 한계 일치, FK 일치(무작위 200자세, 오차 1e-15), TCP = 플랜지 → `robot/model_checks.md`
 - [x] 5-1 재생 함수 `replay(q_traj)` v1 형태 고정 → `replay/README.md`
 - [x] 비교 알고리즘 확정 (2026-11-04): A DLS / B mink / C EAIK, D 제외 (1절)
+- [x] 7번 OpenVLA 환경 (정구현, 2026-11-06): `openvla` 환경 설치, 모델 다운로드, LIBERO 200스텝 시험 학습 통과, 학습 데이터 형식·설정 결정 (5절 「OpenVLA 학습」)
 
 ### 다음
 1. **3번 에피소드:** 에피소드마다 시작·끝 프레임 라벨(`episodes/labeling_rules.md`) → `episodes/tools/process_episode.py`로 키포인트·3D 궤적 생성 (보정은 태스크별 `--calib sync/exo_calib_T{n}.json`). 아직 실제 데이터에 돌리지 않음
 2. **4번 리타게팅:** A·B·C 첫 구현 완료(2026-11-05, 시험 에피소드 T1_E004) → `retarget/README.md`. 남은 것: 멘토 확인(팔 길이 비율·로봇 자리, 팔꿈치 입력, C의 3번 관절 탐색), 3번 전체 에피소드가 나오면 일괄 실행 → `retarget/<알고리즘>/<에피소드ID>.npz`
    - C: EAIK 왕복 검사 1000/1000 통과 (`retarget/eaik_check.py`). `robot` 환경에 eaik 1.2.2 설치 (5절)
 3. **5-2 지표:** `metrics/definitions.md` 멘토 확인 후 고정 → `metrics.py`, `summary.md`. 저크 Δt가 1/30으로 적혀 있으나 exo_front는 약 60 fps → 30 Hz로 맞출지 Δt를 고칠지 결정
-4. **6 RLDS 변환 · 7 OpenVLA LoRA 학습 · 8 평가:** 시작 전
+4. **6 RLDS 변환 · 7 OpenVLA LoRA 학습:** C 결과 → `knu_retarget` RLDS 변환 코드와 OpenVLA 데이터셋 등록(`configs.py`·`transforms.py`) → C 리허설 결과로 변환·짧은 학습 점검 → 최종 C 결과로 20,000스텝 본 학습 (정구현, 6번 차서현과 공유)
+5. **8 평가:** 시작 전
 
 ### 보류·확인 필요
 - 멘토 쪽 소통 담당자 지정 후 미팅 일정
