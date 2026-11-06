@@ -380,13 +380,14 @@ project/
 - [x] 5-1 재생 함수 `replay(q_traj)` v1 형태 고정 → `replay/README.md`
 - [x] 비교 알고리즘 확정 (2026-11-04): A DLS / B mink / C EAIK, D 제외 (1절)
 - [x] 7번 OpenVLA 환경 (정구현, 2026-11-06): `openvla` 환경 설치, 모델 다운로드, LIBERO 200스텝 시험 학습 통과, 학습 데이터 형식·설정 결정 (5절 「OpenVLA 학습」)
+- [x] 6번 RLDS 변환 파이프라인 (정구현, 2026-11-06): OpenVLA 패치(`rlds/openvla/`), 변환(`rlds/make_knu_retarget.py`), RLDS 빌더·점검(`rlds/knu_retarget/`, `rlds/check_rlds.py`). C 리허설 결과 84개 → 5,595스텝 → OpenVLA 50스텝 학습 통과, 7관절 모두 정규화 확인 → `rlds/README.md`, `rlds/train/README.md`
 
 ### 다음
 1. **3번 에피소드:** 에피소드마다 시작·끝 프레임 라벨(`episodes/labeling_rules.md`) → `episodes/tools/process_episode.py`로 키포인트·3D 궤적 생성 (보정은 태스크별 `--calib sync/exo_calib_T{n}.json`). 아직 실제 데이터에 돌리지 않음
 2. **4번 리타게팅:** A·B·C 첫 구현 완료(2026-11-05, 시험 에피소드 T1_E004) → `retarget/README.md`. 남은 것: 멘토 확인(팔 길이 비율·로봇 자리, 팔꿈치 입력, C의 3번 관절 탐색), 3번 전체 에피소드가 나오면 일괄 실행 → `retarget/<알고리즘>/<에피소드ID>.npz`
    - C: EAIK 왕복 검사 1000/1000 통과 (`retarget/eaik_check.py`). `robot` 환경에 eaik 1.2.2 설치 (5절)
 3. **5-2 지표:** `metrics/definitions.md` 멘토 확인 후 고정 → `metrics.py`, `summary.md`. 저크 Δt가 1/30으로 적혀 있으나 exo_front는 약 60 fps → 30 Hz로 맞출지 Δt를 고칠지 결정
-4. **6 RLDS 변환 · 7 OpenVLA LoRA 학습:** C 결과 → `knu_retarget` RLDS 변환 코드와 OpenVLA 데이터셋 등록(`configs.py`·`transforms.py`) → C 리허설 결과로 변환·짧은 학습 점검 → 최종 C 결과로 20,000스텝 본 학습 (정구현, 6번 차서현과 공유)
+4. **6 RLDS 변환 · 7 OpenVLA LoRA 학습 (정구현):** 파이프라인 점검 완료(리허설 84개). 남은 것: 최종 C 결과(225개)가 나오면 `rlds/run_convert.sh` → `rlds/build.py` → `rlds/check_rlds.py` → `rlds/train/train_knu.sh`(20,000스텝, 약 하루, 체크포인트 약 150 GB). 학습 후 추론 점검(가이드 7번 6단계)
 5. **8 평가:** 시작 전
 
 ### 보류·확인 필요
