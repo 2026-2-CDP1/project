@@ -49,3 +49,30 @@ sbatch -p p02 --gres=gpu:1 -c 2 --mem=16G --time=00:10:00 --job-name gpucheck_�
 | 속도 | 스텝당 약 2.9초 → 20,000스텝 약 16시간 + 저장 시간 |
 
 학습 기록은 wandb offline이라 서버 `~/vla/openvla/wandb/`에만 남는다.
+
+---
+
+## 2. 변환: 리타게팅 결과 → 학습용 에피소드 (`make_knu_retarget.py`)
+
+알고리즘 결과 npz(`retarget/README.md` 출력 형식)와 3번 에피소드 폴더(`meta.json`, `exo.mov`)를 읽어 에피소드마다 npz 하나를 만든다.
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 이미지 | exo_front, 256×256 RGB (OpenVLA 로더가 224로 다시 줄임) | 리타게팅 결과의 시간축이 exo_front |
+| 간격 | 10 Hz. 60 fps는 6장, 30 fps는 3장마다 1장 | OpenVLA 사전학습 데이터 대부분이 3~20 Hz |
+| 상태 `state[k]` | `q[idx[k]]` 현재 7관절 각도 (rad) | |
+| 행동 `action[k]` | `q[idx[k+1]]` 다음 스텝 7관절 각도 (rad). 마지막 스텝은 다음이 없어 뺌 | |
+| 지시문 | T1 `pick up the cup` / T2 `stack the block` / T3 `move the block` | |
+
+- 프레임 대응: `q[i]` = exo_front 영상 프레임 `meta["exo_start_frame"] + i`
+- 영상은 저장된 그대로 읽는다 (`CAP_PROP_ORIENTATION_AUTO = 0`, `sync/protocol.md` 8절)
+- 건너뛰거나 실패한 에피소드도 지우지 않고 `summary.csv`에 이유와 함께 남긴다 (`status` = ok / skip / error)
+
+```bash
+RETARGET=~/out/hyojeong/retarget/<실행>/C_eaik EPISODES=~/out/seohyeon/<에피소드 폴더> \
+sbatch -p p02 -c 8 --mem=32G --time=02:00:00 --job-name knu_convert_본인이름 \
+    -o ~/out/본인이름/knu_convert.log rlds/run_convert.sh
+```
+결과: `~/vla/data/knu_retarget_src/<에피소드ID>.npz` (`image` (N,256,256,3), `state` (N,7), `action` (N,7), `frames`, `instruction`), `summary.csv`
+
+**2026-11-06 확인:** C 리허설 결과(`rehearsal_clap/C_eaik`, 박수 구간 기준 시험용) 84개 → 84개 ok, 5,595스텝, 588 MB
