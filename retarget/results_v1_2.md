@@ -110,3 +110,19 @@ python retarget/check_feasible.py --out $O && python retarget/check_where.py --o
 python retarget/check_speed.py --out $O && python retarget/check_a_fail.py --out $O
 python retarget/compare_runs.py --root ~/out/hyojeong/retarget --ref v1_2     # 4·5절 비교표
 ```
+
+## 7. 확정 (2026-11-07): C 본 결과 = SEW 고정 → 설정 v1.3
+
+팀 결정. 미리 정한 기준대로 (① 성공률·팔 회전각 차이 같음 → ② 관절이 한계에 덜 붙는 SEW 고정). 다른 설정은 v1.2와 같아 다시 실행하지 않고, 공식 결과 = 본 실행 A·B + 비교 실행 C SEW.
+
+| v1.3 공식 | A (DLS, clip) | B (mink) | C (EAIK, SEW 고정) |
+|---|---|---|---|
+| 성공률 전체 / 할 수 있는 목표만 | 64.0 / 87.9% | 72.9 / 100% | 72.1 / 100% |
+| 팔 회전각 차이 중앙 / 95% (참고) | 146.7° / 176.9° | 135.5° / 173.1° | 25.0° / 55.0° |
+| 관절이 한계에 붙은 프레임 | 34.7% | 19.4% | 9.3% (2번 관절 6.1%) |
+| 30° 넘는 튐 | 194 | 91 | 331 |
+| IK 시간 중앙 / 95% | 0.5 / 10.4 ms | 43.3 / 45.1 ms | 42.6 / 260.2 ms |
+| 관절 속도 한계 넘는 프레임 | 48.5% | 49.3% | 38.3% |
+
+- 서버 공식 폴더 `~/out/hyojeong/retarget/v1_3` = `A_DLS`·`B_mink` → `v1_2`, `C_eaik` → `v1_2_Csew` (연결). 5-2 `metrics.py`, 6·7번 RLDS 변환은 이 폴더를 쓰면 됨. 분석 csv는 `results/v1_2_Csew/`와 같음.
+- 남은 것: C 시간 95% 260 ms. 사람 SEW가 한계 밖이라 가장 가까운 각을 찾는 탐색 때문이며 C의 특성으로 보고. 속도 개선(직전 프레임 각부터 찾기)은 결과가 바뀔 수 있어 보류.
