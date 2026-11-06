@@ -237,7 +237,7 @@ def main(out_dir):
 
     ok_run, ok_info = run_end_to_end(r, home)
     check("전체 실행 (run)", "가짜 4번·3번 폴더 + obstacles.json + 테이블 가장자리 → metrics_long.csv", ok_run, 1)
-    check("npz info로 좌표 변환", "알고리즘 2개 같은 info → ok, info가 다른 에피소드 → 오류로 기록", ok_info, 1)
+    check("npz info로 좌표 변환 + labels.json 없음", "info 같으면 ok·다르면 오류 / labels.json 없는 에피소드도 ok, 파지점 거리만 NaN", ok_info, 1)
     summary_checks()
     write_report(out_dir)
     return all(ok for *_, ok in RESULTS)
@@ -307,8 +307,9 @@ def run_end_to_end(r, home):
         (ep / "keypoint_names.json").write_text(json.dumps(NAMES))
         (ep / "meta.json").write_text(json.dumps({"task": "컵 잡기", "case_tags": ["큰 이동", "가장자리"],
                                                  "exo_start_frame": start}, ensure_ascii=False))
-        (ep / "labels.json").write_text(json.dumps({"exo_start_frame": start, "exo_end_frame": start + T,
-                                                   "grasp_frame": start + 50}))
+        if eid == "T1_E999":                                                # E998은 labels.json 없음 (3번 처리 직후 상태)
+            (ep / "labels.json").write_text(json.dumps({"exo_start_frame": start, "exo_end_frame": start + T,
+                                                       "grasp_frame": start + 50}))
         with open(ep / "exo_ts.csv", "w", newline="") as f:
             f.write("t_s\n" + "\n".join(f"{t:.6f}" for t in 1000 + np.arange(T) / fps) + "\n")
         for algo in ("A_test", "B_test"):
@@ -337,7 +338,11 @@ def run_end_to_end(r, home):
               and rows[0]["case_tags"] == "큰 이동|가장자리" and v["retarget_fail_rate"] == 0.0
               and abs(v["arm_angle_diff_rad"]) < 1e-9 and v["compute_ms_median"] == 3.0 and v["env_collision_rate"] == 0.0)
     status = {k: row["status"] for k, row in info.items()}
-    ok_info = (status[("A_test", "T1_E998")] == "ok" and status[("A_test", "T1_E999")] == "ok"
+    no_lab = info[("A_test", "T1_E998")]
+    g998 = [row for row in rows if row["algo"] == "A_test" and row["episode_id"] == "T1_E998" and row["metric"] == "grasp_dist_m"]
+    ok_info = ok_info_labels = (no_lab["status"] == "ok" and "labels.json 없음" in no_lab["grasp_note"]
+                                and g998 and g998[0]["value"] in ("nan", "NaN", ""))
+    ok_info = ok_info_labels and (status[("A_test", "T1_E998")] == "ok" and status[("A_test", "T1_E999")] == "ok"
                and status[("B_test", "T1_E999")] == "ok" and "info" in status[("B_test", "T1_E998")]
                and status[("B_test", "T1_E998")].startswith("오류"))
     return (1 if ok_run else 0), (1 if ok_info else 0)
