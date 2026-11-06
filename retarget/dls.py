@@ -1,4 +1,8 @@
-"""A_DLS: 감쇠 최소제곱(DLS) IK, pinocchio. 관절 한계는 매 반복 뒤 잘라낸다(clip).
+"""A_DLS: 감쇠 최소제곱(DLS) IK, pinocchio. 관절 한계 처리 limits:
+  clip  (v1)  매 반복 뒤 한계 밖 관절을 잘라냄. 잘린 관절이 못 움직인 몫을 나머지 관절이 모름
+              → 할 수 있는 목표에서 A 실패 4335프레임 100%가 관절이 한계에 붙은 채 멈춤 (check_a_fail.py, 11/6)
+  clamp       한 반복 안에서: 한계를 넘을 관절을 한계까지만 보내고 묶은 뒤(야코비안 열 0),
+              남은 오차를 나머지 관절로 다시 풂. 새로 넘는 관절이 없을 때까지 (최대 8번). 표준 DLS 한계 처리
 
 주 목표 (손목 = TCP 위치·방향, 6차원):
   dq1 = J^T (J J^T + lam^2 I)^-1 e      (pinocchio 공식 IK 예제와 같은 오차·야코비안 정의, 프레임 LOCAL)
@@ -34,11 +38,16 @@ TCP_FRAME = "iiwa_link_ee_kuka"   # = MJCF attachment_site (플랜지)
 ELBOW_FRAME = "iiwa_link_4"       # 원점 = 4번 관절 = 팔꿈치 (어깨에서 0.42 m)
 WRIST_FRAME = "iiwa_link_6"       # 원점 = 6번 관절 = 손목 중심 (팔꿈치에서 0.40 m)
 DEFAULT = {"lam": 0.05, "step": 1.0, "max_iter": 100, "tol_pos": 1e-4, "tol_rot": 1e-3,
-           "w_elbow": 0.5, "tol_elbow_step": 1e-4}   # w_elbow 0.5: 팀 결정, A·B·C 모두 사람 팔꿈치를 입력으로 (0이면 끔)
+           "w_elbow": 0.0, "tol_elbow_step": 1e-4,   # w_elbow 0: 기존 알고리즘 그대로 손목만 (v1.2). 0.5 = v1.1 팔꿈치 입력
+           "limits": "clip"}   # 관절 한계 처리: clip(본 결과, 잘라냄) / clamp(비교용, 걸린 관절을 한계에 묶고 나머지로 다시 풂)
+LIMIT_MODES = ("clip", "clamp")
 
 
 class DLS:
-    def __init__(self, urdf, lam, step, max_iter, tol_pos, tol_rot, w_elbow, tol_elbow_step):
+    def __init__(self, urdf, lam, step, max_iter, tol_pos, tol_rot, w_elbow, tol_elbow_step, limits="clip"):
+        if limits not in LIMIT_MODES:
+            raise ValueError(f"limits 는 {LIMIT_MODES} 중 하나 (받은 값 {limits!r})")
+        self.limits = limits
         self.model = pin.buildModelFromUrdf(str(urdf))
         self.data = self.model.createData()
         self.fid = self.model.getFrameId(TCP_FRAME)
@@ -65,13 +74,27 @@ class DLS:
         sat = np.zeros(7, bool)
         use_elbow = self.w_elbow > 0 and n_h is not None
         lam2_6, lam2_3, I7 = self.lam ** 2 * np.eye(6), self.lam ** 2 * np.eye(3), np.eye(7)
+        n_lim, lim_joints = 0, np.zeros(7, bool)   # 한계에 걸린 반복 수, 한 번이라도 걸린 관절 (clip: 잘림, clamp: 묶임)
         for it in range(self.max_iter + 1):
             iMd = self.fk(q).actInv(oMdes)
             err = pin.log6(iMd).vector                      # TCP 기준 (위치 3, 회전 3)
             J = pin.computeFrameJacobian(self.model, self.data, q, self.fid)   # LOCAL
             J = -pin.Jlog6(iMd.inverse()) @ J
-            Jp = J.T @ np.linalg.inv(J @ J.T + lam2_6)       # 감쇠 의사역행렬
-            v = -Jp @ err
+            # free: 1 = 움직이는 관절, 0 = 이번 반복에서 한계에 묶은 관절. v_fix: 묶은 관절이 한계까지 가는 양
+            free, v_fix = np.ones(7), np.zeros(7)
+            for _ in range(8):
+                Jw = J * free                                # 묶은 관절 열 = 0
+                Jp = Jw.T @ np.linalg.inv(Jw @ Jw.T + lam2_6)   # 감쇠 의사역행렬
+                v = v_fix - Jp @ (err + J @ v_fix)           # 묶은 관절 움직임을 뺀 나머지 오차를 남은 관절이 맡음
+                if self.limits != "clamp":
+                    break                                    # clip(v1): 한 번 풀고 반복 끝에서 잘라냄
+                q_try = q + self.step * v
+                over = (free > 0) & ((q_try < self.lo) | (q_try > self.hi))
+                if not over.any():
+                    break
+                free[over] = 0
+                lim_joints |= over
+                v_fix[over] = (np.clip(q_try[over], self.lo[over], self.hi[over]) - q[over]) / self.step
             v2 = np.zeros(7)
             # 팔꿈치는 반복 앞 절반에서만. 뒤 절반은 주 목표(손목)만 풀어 손목 정확도를 지킨다
             if use_elbow and it < self.max_iter // 2:
@@ -80,7 +103,7 @@ class DLS:
                 if E_des is not None:
                     Je = pin.computeFrameJacobian(self.model, self.data, q, self.fid_e,
                                                   pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[:3]
-                    N = I7 - Jp @ J
+                    N = np.diag(free) @ (I7 - Jp @ Jw)          # 손목을 안 건드리고, 묶은 관절도 안 움직이는 방향
                     JeN = Je @ N
                     v2 = N @ (JeN.T @ np.linalg.solve(JeN @ JeN.T + lam2_3, self.w_elbow * (E_des - E)))
             done = (np.linalg.norm(err[:3]) < self.tol_pos and np.linalg.norm(err[3:]) < self.tol_rot
@@ -91,7 +114,9 @@ class DLS:
             if v2.any() and ((q_new < self.lo) | (q_new > self.hi)).any():
                 q_new = pin.integrate(self.model, q, self.step * v)   # 팔꿈치 목표가 관절을 한계 밖으로 밀면 이번엔 손목만
             q = q_new
-            sat = (q < self.lo) | (q > self.hi)
+            sat = (q < self.lo) | (q > self.hi) | (free == 0)
+            n_lim += bool(sat.any())
+            lim_joints |= sat
             q = np.clip(q, self.lo, self.hi)
         M = self.fk(q)
         pos_err = float(np.linalg.norm(M.translation - p_des))
@@ -99,6 +124,7 @@ class DLS:
         status = common.STATUS_OK if (pos_err < self.tol_pos and rot_err < self.tol_rot) else common.STATUS_MAXITER
         S, E, W = self.points()
         swv_err = common.swivel_error(S, E, W, n_h) if n_h is not None else np.nan
+        self.last_limit = (n_lim, lim_joints)
         return q, sat, status, pos_err, rot_err, swv_err, it
 
 
@@ -114,6 +140,8 @@ def run_episode(solver, targets, q_start=common.Q_HOME, restart_tol=0.0):
     time_ms = np.full(T, np.nan)   # 프레임당 IK 시간 (solve 호출만, 목표 없는 프레임은 NaN)
     elbow_used = np.zeros(T, bool)  # 사람 팔꿈치를 목표로 쓴 프레임
     restarted = np.zeros(T, bool)   # home 에서 다시 푼 결과를 쓴 프레임
+    limit_iters = np.zeros(T, np.int32)    # 그 프레임에서 관절 한계에 걸린 반복 수 (clip: 잘림, clamp: 묶음)
+    limit_joints = np.zeros((T, 7), bool)  # 그 프레임에서 한 번이라도 한계에 걸린 관절
     q = np.asarray(q_start, float).copy()
     for t in range(T):
         if targets["valid"][t]:
@@ -128,10 +156,12 @@ def run_episode(solver, targets, q_start=common.Q_HOME, restart_tol=0.0):
                     res, restarted[t] = res2, True
             time_ms[t] = 1000 * (time.perf_counter() - t0)
             q, sat_out[t], status[t], pos_err[t], rot_err[t], swv_err[t], iters[t] = res
+            limit_iters[t], limit_joints[t] = solver.last_limit
         q_out[t] = q          # 목표 없음 -> 직전 자세 유지
     solved = np.flatnonzero(status != common.STATUS_NO_TARGET)
     if len(solved):           # 맨 앞 빈 프레임은 home 대신 첫 해로 채움 (home -> 첫 해 튐 방지, status는 2 그대로)
         q_out[:solved[0]] = q_out[solved[0]]
+    solver.episode_limit = (limit_iters, limit_joints)   # 반환 형식(run_all.py)을 바꾸지 않으려고 풀이기에 남김
     return q_out, sat_out, status, pos_err, rot_err, swv_err, iters, time_ms, elbow_used, restarted
 
 
@@ -159,7 +189,7 @@ def main():
     targets = common.make_targets(ep, scale=scale, r_off=a.r_off, anchor=a.anchor, mount=a.mount, base_z=a.base_z,
                                   pos_only=a.pos_only)
     solver = DLS(Path(a.urdf).expanduser(), a.lam, a.step, a.max_iter, a.tol_pos, a.tol_rot,
-                 a.w_elbow, a.tol_elbow_step)
+                 a.w_elbow, a.tol_elbow_step, a.limits)
 
     t0 = time.time()
     q, sat, status, pos_err, rot_err, swv_err, iters, time_ms, elbow_used, restarted = run_episode(
