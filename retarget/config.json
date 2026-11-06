@@ -1,6 +1,6 @@
 {
   "_note": "4번 리타게팅 설정. 결과를 보기 전에 고정 (공통 규칙). run_all.py 는 이 파일만 읽어 A·B·C에 같은 설정을 쓴다 (각 스크립트 기본값과도 같음). 바꾸면 이유를 README 변경 기록에 적고 A·B·C 모든 에피소드를 다시 실행",
-  "version": "1.1 고정 (2026-11-06)",
+  "version": "1.2 고정 (2026-11-06)",
   "common": {
     "scale": "arm_global",
     "_scale_note": "k = 0.82 m / 사람 팔 길이(위팔+아래팔). 사람 팔 길이 = 모든 에피소드(제외 목록 빼고) 에피소드별 중앙값의 중앙값 하나. human_arm_m 에 숫자를 넣으면 그 값으로 고정. 1.0 은 에피소드별(arm)",
@@ -9,15 +9,16 @@
     "base_z": 0.0,
     "r_off": "palm",
     "pos_only": "hold",
-    "elbow_input": "A·B·C 모두 사람 팔꿈치 입력 (팀 결정 T10). 안 보인 프레임은 직전 팔꿈치 유지, 맨 앞은 처음 보인 방향",
+    "elbow_input": "v1.2: 세 알고리즘 모두 기존 그대로 → A·B는 손목만(w_elbow 0), C는 사람 SEW 각이 원래 입력. 안 보인 프레임은 직전 팔꿈치 유지, 맨 앞은 처음 보인 방향",
     "start_pose": "home (robot.xml keyframe), 맨 앞 목표 없는 프레임은 첫 해로 채움"
   },
   "A_DLS": {"script": "dls.py", "lam": 0.05, "step": 1.0, "max_iter": 100, "tol_pos": 1e-4, "tol_rot": 1e-3,
-            "w_elbow": 0.5, "tol_elbow_step": 1e-4},
-  "B_mink": {"script": "mink_ik.py", "solver": "daqp", "w_elbow": 0.1, "posture": 1e-6, "damping": 1e-8,
+            "w_elbow": 0.0, "tol_elbow_step": 1e-4, "limits": "clip",
+            "_limits_note": "본 결과 clip (사전 정의). clamp 는 한계 처리 방식 비교용 (README 비교 실행)"},
+  "B_mink": {"script": "mink_ik.py", "solver": "daqp", "w_elbow": 0.0, "posture": 1e-6, "damping": 1e-8,
              "lm_damping": 1.0, "max_iter": 100, "tol_pos": 1e-4, "tol_rot": 1e-3, "tol_step": 1e-5, "sat_eps": 1e-3},
   "C_eaik": {"script": "eaik_ik.py", "select": "human", "lock_joint": 3, "grid_deg": 1.0, "refine_deg": 0.1,
-             "sat_eps": 1e-3},
+             "sat_eps": 1e-3, "_select_note": "human = 3번 관절 격자 탐색(지금). sew = 사람 SEW 각 고정(멘토 11/6 제안) 비교 후 확정 (README)"},
   "timing": {
     "node": "실행할 때 sbatch -w 로 고정. 실제 노드는 run_all.py 가 <out>/run_info_<작업번호>.json 에 기록",
     "slurm": "sbatch -p p02 -w <노드> -n 1 -c 1 --mem=4G",

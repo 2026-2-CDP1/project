@@ -1,6 +1,6 @@
 """실패가 구간 어디서 나는지: 처음 0.5초 / 가운데 / 마지막 0.5초로 나눈 실패율 (태스크별) — 3번 요청 (11/6).
 
-프레임 판정은 check_success.py 와 같음 (손목 1 cm · 5° · 한계 안, 목표 NaN 프레임은 뺌).
+프레임 판정은 check_success.py 와 같음 (손목 0.5 cm · 1° · 한계 안, 목표 NaN 프레임은 뺌, common.SUCCESS_*).
 할 수 없는 목표 = C가 정확한 해를 못 찾은 프레임 (check_feasible.py 와 같음).
 구간이 1초보다 짧은 에피소드(T2 빠른 조건 등)는 가운데 없이 앞 절반 = 처음, 뒤 절반 = 끝으로 셈 (개수를 따로 표시).
 T2 는 빠른 조건(E026~E035, E068, E069)을 따로 한 줄 더 보여 줌.
@@ -17,8 +17,10 @@ from pathlib import Path
 
 import numpy as np
 
+import common  # noqa: E402  (같은 retarget 폴더, 성공 판정 기준)
+
 ALGOS = ("A_DLS", "B_mink", "C_eaik")
-POS_TOL, ROT_TOL, LIM_EPS = 0.01, np.radians(5.0), 1e-6
+POS_TOL, ROT_TOL, LIM_EPS = common.SUCCESS_POS_M, np.radians(common.SUCCESS_ROT_DEG), 1e-6   # main 에서 --pos-tol-cm 등으로 덮어씀
 PARTS = ("처음", "가운데", "끝")
 T2_FAST = {f"T2_E{n:03d}" for n in list(range(26, 36)) + [68, 69]}
 
@@ -44,7 +46,11 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--edge", type=float, default=0.5, help="처음·끝 길이 (초)")
     ap.add_argument("--limits", default="~/project/robot/joint_limits.csv")
+    common.add_success_args(ap)
     a = ap.parse_args()
+    global POS_TOL, ROT_TOL
+    POS_TOL, ROT_TOL = common.success_tols(a)
+    print(f"판정 기준: {common.success_text(a)}")
     out = Path(a.out).expanduser()
     lim = list(csv.DictReader(open(Path(a.limits).expanduser(), encoding="utf-8")))
     lo, hi = np.array([float(r["lower_rad"]) for r in lim]), np.array([float(r["upper_rad"]) for r in lim])

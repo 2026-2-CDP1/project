@@ -19,8 +19,10 @@ from pathlib import Path
 
 import numpy as np
 
+import common  # noqa: E402  (같은 retarget 폴더, 성공 판정 기준)
+
 ALGOS = ("A_DLS", "B_mink", "C_eaik")
-POS_TOL, ROT_TOL = 0.01, np.radians(5.0)
+POS_TOL, ROT_TOL = common.SUCCESS_POS_M, np.radians(common.SUCCESS_ROT_DEG)   # main 에서 --pos-tol-cm 등으로 덮어씀
 
 
 def wrist_center_dist(p, qt):
@@ -33,7 +35,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--records", default="~/project/episodes/records.csv")
+    common.add_success_args(ap)
     a = ap.parse_args()
+    global POS_TOL, ROT_TOL
+    POS_TOL, ROT_TOL = common.success_tols(a)
+    print(f"판정 기준: {common.success_text(a)}")
     out = Path(a.out).expanduser()
     try:
         rec = {r["episode_id"]: r for r in csv.DictReader(open(Path(a.records).expanduser(), encoding="utf-8"))}

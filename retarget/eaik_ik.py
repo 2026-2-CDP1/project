@@ -4,10 +4,16 @@ EAIK는 7관절 팔을 관절 하나(3번)를 정해진 값에 고정해 6관절
   1) 3번 관절 값을 격자(기본 1°)로 바꿔 가며 EAIK로 해를 전부 구하고 (값마다 해 최대 8개)
   2) 관절 한계 밖 해는 버리고
   3) 남은 해 중 하나를 고른다
-       select=human:      팔꿈치 방향이 사람과 가장 비슷한 해 (팀 결정: A·B·C 모두 사람 팔꿈치 입력)
+       select=human:      팔꿈치 방향이 사람과 가장 비슷한 해 (사람 SEW 각이 C 의 원래 입력)
                           사람 팔꿈치가 안 보이는 프레임은 continuity 로
        select=continuity: 직전 프레임 자세와 가장 가까운 해 (각도 2π 감기 고려)
   4) 고른 3번 값 근처를 촘촘히(기본 0.1°) 다시 풀어 다듬는다
+select=sew (멘토 11/6 제안: 사람 SEW 각으로 고정 → 격자 탐색 없이 해석해 → 직전 프레임과 가장 가까운 해):
+  1) 사람 팔꿈치 방향으로 로봇 팔꿈치 점 E 를 정함 (어깨–손목 축 둘레 원 위, common.robot_elbow_target 과 같음)
+  2) E 를 만드는 1·2번 관절 (q1, q2) 두 쌍 → 손목 중심이 팔 평면에 오도록 하는 3번 관절 값을 FK로 바로 계산 (쌍마다 q3, q3+π)
+  3) 그 3번 값으로 EAIK 해 → 관절 한계 안 + 팔꿈치가 E 인 해만 → 직전 프레임과 가장 가까운 해
+  4) 한계 안 해가 없으면 팔 회전각을 사람 값에서 ±1°씩 벌려 가며 다시 (한계 안에서 사람과 가장 가까운 팔 회전각)
+  5) 그래도 없거나(손목이 안 닿음 등) 사람 팔꿈치가 안 보이는 프레임은 격자 방식(직전 자세와 가장 가까운 해)으로
 - TCP 보정: EAIK 끝 프레임 = 7번 관절 위치(우리 TCP보다 플랜지 축으로 0.045 m 안쪽), 회전 차이 0 (eaik_check.py 로 확인)
 - status: 0 = 정확한 해, 1 = 근사해(LS)만 있음, 2 = 목표 없음 또는 한계 안 해 없음(직전 자세 유지)
 - saturated: 관절이 한계에서 sat_eps 이내 (5-2와 정할 공통 규칙 제안안)
@@ -37,7 +43,9 @@ import common  # noqa: E402
 TCP_FRAME, ELBOW_FRAME, WRIST_FRAME = "iiwa_link_ee_kuka", "iiwa_link_4", "iiwa_link_6"
 LOCK = 2             # 3번 관절 (0부터 셈)
 TIE = 1e-3           # human 모드에서 팔꿈치 차이가 거의 같을 때 직전 자세와 가까운 쪽을 고르는 가중치 (rad/rad)
-SELECTS = ("human", "continuity")
+SELECTS = ("human", "continuity", "sew")
+SEW_STEP = np.radians(1.0)   # sew 모드: 사람 팔 회전각으로 한계 안 해가 없을 때 벗어나 보는 간격
+ELBOW_TOL = 1e-5             # sew 모드: 해의 팔꿈치가 정한 팔꿈치 점과 같다고 보는 거리 (m)
 DEFAULT = {"grid_deg": 1.0, "refine_deg": 0.1, "sat_eps": 1e-3}
 
 
@@ -138,6 +146,59 @@ class EaikIK:
         i = int(np.argmin(self.scores(Q, q_prev, n_h, W)))
         return pool[i], bool(exact)
 
+    def q3_for_elbow(self, q1, q2, E, W):
+        """1·2번 관절이 (q1, q2)일 때 아래팔이 손목 중심 W 쪽을 향하게 하는 3번 관절 값 (q4 < 0 기준 하나, 다른 하나는 +π).
+        3번 관절은 위팔 축 둘레 회전이므로, 위팔 축에 수직인 평면에서 아래팔 방향을 W−E 방향으로 돌리는 각."""
+        e = (E - common.IIWA_SHOULDER) / common.L_UPPER
+        perp = lambda v: v - np.dot(v, e) * e
+        t = perp(W - E)
+        if np.linalg.norm(t) < 1e-9:
+            return None                                       # 팔이 일직선: 3번 값이 정해지지 않음
+        q = np.array([q1, q2, 0.0, -np.pi / 2, 0.0, 0.0, 0.0])
+        _, E0, W0 = self.fk(q)
+        q[2] = np.pi / 2
+        _, _, W90 = self.fk(q)
+        p0, p90 = perp(W0 - E0), perp(W90 - E0)
+        return float(np.arctan2(np.dot(t, p90) / np.linalg.norm(p90), np.dot(t, p0) / np.linalg.norm(p0)))
+
+    def solve_sew(self, q_prev, T_e, W, n_h):
+        """사람 팔 회전각으로 팔꿈치를 고정해 푼다. 반환 (q, 후보 수, 3번 값, 벗어난 각 rad) 또는 None."""
+        S = common.IIWA_SHOULDER
+        u = W - S
+        d = np.linalg.norm(u)
+        if not (abs(common.L_UPPER - common.L_FORE) < d < common.L_UPPER + common.L_FORE):
+            return None                                       # 손목이 안 닿거나 너무 가까움 → 격자 방식(근사해)
+        u /= d
+        n = n_h - np.dot(n_h, u) * u
+        if np.linalg.norm(n) < 1e-6:
+            return None
+        n /= np.linalg.norm(n)
+        b = np.cross(u, n)
+        for k in range(int(np.pi / SEW_STEP) + 1):
+            for delta in ((0.0,) if k == 0 else (k * SEW_STEP, -k * SEW_STEP)):
+                E = common.robot_elbow_target(S, W, np.cos(delta) * n + np.sin(delta) * b)
+                if E is None:
+                    return None
+                e = (E - S) / common.L_UPPER
+                q2 = float(np.arccos(np.clip(e[2], -1.0, 1.0)))
+                q1 = float(np.arctan2(e[1], e[0]))
+                pool = []
+                for a1, a2 in ((q1, q2), (wrap(q1 + np.pi), -q2)):     # 같은 팔꿈치 점을 만드는 두 쌍
+                    q3 = self.q3_for_elbow(a1, a2, E, W)
+                    if q3 is None:
+                        continue
+                    for v in (q3, wrap(q3 + np.pi)):
+                        if not (self.lo[LOCK] <= v <= self.hi[LOCK]):
+                            continue
+                        for q, ls in self.candidates(HPRobot(self.H, self.P, [(LOCK, float(v))]), v, T_e):
+                            if not ls and np.linalg.norm(self.elbow_points(q[None])[0] - E) < ELBOW_TOL:
+                                pool.append((q, v))
+                if pool:
+                    Q = np.array([p[0] for p in pool])
+                    i = int(np.argmin(np.linalg.norm(wrap(Q - q_prev), axis=1)))   # 직전 프레임과 가장 가까운 해
+                    return pool[i][0], len(pool), pool[i][1], delta
+        return None
+
     def solve(self, q_prev, p_des, R_des, n_h=None):
         """한 프레임. 반환 (q, saturated(7,), status, 위치 오차, 방향 오차, 팔 회전각 오차, 후보 수, 고른 3번 값)."""
         T = np.eye(4)
@@ -145,7 +206,18 @@ class EaikIK:
         T_e = T @ self.T_off_inv
         W = p_des - common.WRIST_TO_FLANGE * R_des[:, 2]     # 손목 중심 목표 (모든 해가 같음)
 
-        cand = [(q, ls, q3) for q3, r in zip(self.grid, self.robots) for q, ls in self.candidates(r, q3, T_e)]
+        self.last_sew = np.nan                                # sew 로 푼 프레임: 사람 팔 회전각에서 벗어난 각 (rad), 아니면 NaN
+        if self.select == "sew" and n_h is not None:
+            r = self.solve_sew(q_prev, T_e, W, n_h)
+            if r is not None:
+                q, n_cand, q3, self.last_sew = r
+                T_q, E, Wq = self.fk(q)
+                pe = float(np.linalg.norm(T_q[:3, 3] - p_des))
+                re = float(Rot.from_matrix(T_q[:3, :3].T @ R_des).magnitude())
+                swv = common.swivel_error(common.IIWA_SHOULDER, E, Wq, n_h)
+                return q, self.saturated(q), common.STATUS_OK, pe, re, swv, n_cand, float(q3)
+
+        cand =[(q, ls, q3) for q3, r in zip(self.grid, self.robots) for q, ls in self.candidates(r, q3, T_e)]
         if not cand:
             return q_prev.copy(), self.saturated(q_prev), common.STATUS_NO_TARGET, np.nan, np.nan, np.nan, 0, np.nan
         best, exact = self.pick(cand, q_prev, n_h, W)
@@ -178,20 +250,23 @@ def run_episode(solver, targets, q_start=common.Q_HOME):
     pos_err, rot_err, swv_err, q3_pick, time_ms = (np.full(T, np.nan) for _ in range(5))
     n_cand = np.zeros(T, np.int32)
     elbow_used = np.zeros(T, bool)  # 사람 팔꿈치로 해를 고른 프레임 (아니면 직전 자세와 가장 가까운 해)
+    sew_delta = np.full(T, np.nan)  # sew 모드로 푼 프레임의 팔 회전각 벗어남 (rad). NaN = 격자로 풂
     q = np.asarray(q_start, float).copy()
     for t in range(T):
         if targets["valid"][t]:
             n_h = targets["elbow_dir"][t]
             n_h = n_h if np.isfinite(n_h).all() else None
-            elbow_used[t] = n_h is not None and solver.select == "human"
+            elbow_used[t] = n_h is not None and solver.select in ("human", "sew")
             t0 = time.perf_counter()
             q, sat_out[t], status[t], pos_err[t], rot_err[t], swv_err[t], n_cand[t], q3_pick[t] = solver.solve(
                 q, targets["pos"][t], targets["rot"][t], n_h)
             time_ms[t] = 1000 * (time.perf_counter() - t0)
+            sew_delta[t] = getattr(solver, "last_sew", np.nan)
         q_out[t] = q          # 목표 없음 / 해 없음 -> 직전 자세 유지
     solved = np.flatnonzero(status != common.STATUS_NO_TARGET)
     if len(solved):
         q_out[:solved[0]] = q_out[solved[0]]
+    solver.episode_sew_delta = sew_delta   # 반환 형식(run_all.py)을 바꾸지 않으려고 풀이기에 남김
     return q_out, sat_out, status, pos_err, rot_err, swv_err, n_cand, q3_pick, time_ms, elbow_used
 
 
@@ -231,6 +306,16 @@ def main():
     if a.brief:
         label = f"C {a.mount:4s} {a.anchor:8s} z{a.base_z:+.1f} {a.r_off:6s} {a.select:10s}"
         print(common.brief_line(label, q, sat, status, pos_err, rot_err, swv_err, info) + " | " + common.timing_text(time_ms))
+        if a.select == "sew":
+            sd = solver.episode_sew_delta
+            used, ok = np.isfinite(sd), np.isfinite(time_ms)
+            dd = np.degrees(np.abs(sd[used]))
+            print(f"    sew 로 푼 프레임 {used.sum()} / 목표 {ok.sum()} | 팔 회전각 벗어남 0° {int((dd < 1e-9).sum())}, "
+                  f"중앙 {np.median(dd) if len(dd) else np.nan:.0f}° 95% {np.percentile(dd, 95) if len(dd) else np.nan:.0f}° | "
+                  f"시간 ms 중앙 sew {np.median(time_ms[used]) if used.any() else np.nan:.2f} / 격자로 넘어감 "
+                  f"{np.median(time_ms[ok & ~used]) if (ok & ~used).any() else np.nan:.2f} ({(ok & ~used).sum()}프레임)")
+        jump = np.degrees(np.abs(wrap(np.diff(q, axis=0))).max(axis=1))
+        print(f"    프레임 사이 관절 최대 변화 99% {np.percentile(jump, 99):.1f}°, 30° 넘는 프레임 {int((jump > 30).sum())}")
         return
     print(f"{eid} hand={info['hand']} scale={info['scale']:.3f} r_off={a.r_off} anchor={a.anchor} select={a.select}")
     print(common.summarize("C_eaik", q, sat, status, pos_err, rot_err, sec))

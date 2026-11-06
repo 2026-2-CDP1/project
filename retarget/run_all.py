@@ -81,10 +81,14 @@ def solve(algo, mod, solver, targets, cfg):
     if algo == "C_eaik":
         q, sat, status, pe, re, swv, n_cand, q3, time_ms, used = mod.run_episode(solver, targets)
         extra = dict(rot_error=re, swivel_error=swv, n_candidates=n_cand, q3_pick=q3, time_ms=time_ms, elbow_used=used)
+        if cfg["C_eaik"].get("select") == "sew" and hasattr(solver, "episode_sew_delta"):   # SEW 고정: 사람 각에서 벗어난 각
+            extra.update(sew_delta=solver.episode_sew_delta)
     else:
         q, sat, status, pe, re, swv, iters, time_ms, used, restarted = mod.run_episode(
             solver, targets, restart_tol=cfg[algo].get("restart_tol", 0.0))
         extra = dict(rot_error=re, swivel_error=swv, iters=iters, time_ms=time_ms, elbow_used=used, restarted=restarted)
+        if hasattr(solver, "episode_limit"):   # A: 프레임별 관절 한계에 걸린 반복 수·관절
+            extra.update(limit_iters=solver.episode_limit[0], limit_joints=solver.episode_limit[1])
     return q, sat, status, pe, re, extra
 
 

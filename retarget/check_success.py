@@ -1,6 +1,6 @@
 """리타게팅 성공률 요약 — 5-2 지표 정의서 2.1 기준 (재생 대신 4번 npz의 오차로 빠르게).
 
-success[t] = 손목 위치 오차 ≤ 1 cm  and  방향 오차 ≤ 5°  and  모든 관절이 한계 안 (ε = 1e-6 rad)
+success[t] = 손목 위치 오차 ≤ 0.5 cm  and  방향 오차 ≤ 1°  and  모든 관절이 한계 안 (ε = 1e-6 rad)
 목표가 NaN인 프레임(손목 미검출)은 분모에서 뺌. 에피소드 성공률 = 성공 프레임 / 목표 있는 프레임.
 (4번 tcp_error·rot_error 는 같은 robot.urdf FK로 계산해 5-2 재생 결과와 같다. 공식 값은 5-2 metrics.py)
 
@@ -15,8 +15,10 @@ from pathlib import Path
 
 import numpy as np
 
+import common  # noqa: E402  (같은 retarget 폴더, 성공 판정 기준)
+
 ALGOS = ("A_DLS", "B_mink", "C_eaik")
-POS_TOL, ROT_TOL, LIM_EPS = 0.01, np.radians(5.0), 1e-6
+POS_TOL, ROT_TOL, LIM_EPS = common.SUCCESS_POS_M, np.radians(common.SUCCESS_ROT_DEG), 1e-6   # main 에서 --pos-tol-cm 등으로 덮어씀
 
 
 def load_limits(path):
@@ -39,7 +41,11 @@ def main():
     ap.add_argument("--out", required=True, help="run_all.py --out 폴더")
     ap.add_argument("--records", default="~/project/episodes/records.csv")
     ap.add_argument("--limits", default="~/project/robot/joint_limits.csv")
+    common.add_success_args(ap)
     a = ap.parse_args()
+    global POS_TOL, ROT_TOL
+    POS_TOL, ROT_TOL = common.success_tols(a)
+    print(f"판정 기준: {common.success_text(a)}")
     out = Path(a.out).expanduser()
     lo, hi = load_limits(Path(a.limits).expanduser())
     rec = load_records(Path(a.records).expanduser())
@@ -70,7 +76,7 @@ def main():
         w.writeheader()
         w.writerows(rows)
 
-    print("== 1. 알고리즘별 성공률 (손목 1 cm · 5° · 한계 안, 목표 없는 프레임 제외)")
+    print(f"== 1. 알고리즘별 성공률 ({common.success_text(a)}, 목표 없는 프레임 제외)")
     print("  algo    | 에피소드 | 전체 프레임 기준 | 에피소드 중앙 | 100% 성공 | 90% 이상 | 50~90% | 50% 미만 | 0%   | 실패 원인 (위치 / 방향만 / 한계 밖 프레임)")
     for al in ALGOS:
         R = [r for r in rows if r["algo"] == al]
