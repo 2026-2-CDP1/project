@@ -1,0 +1,75 @@
+diff --git a/prismatic/vla/datasets/rlds/oxe/configs.py b/prismatic/vla/datasets/rlds/oxe/configs.py
+index 2b8dcb9..0fced5a 100644
+--- a/prismatic/vla/datasets/rlds/oxe/configs.py
++++ b/prismatic/vla/datasets/rlds/oxe/configs.py
+@@ -47,6 +47,7 @@ class ActionEncoding(IntEnum):
+     JOINT_POS = 2           # Joint Delta Position (7) + Gripper Open/Close (1)
+     JOINT_POS_BIMANUAL = 3  # Joint Delta Position (2 x [ Joint Delta Position (6) + Gripper Open/Close (1) ])
+     EEF_R6 = 4              # EEF Delta XYZ (3) + R6 (6) + Gripper Open/Close (1)
++    JOINT_POS_ABS = 5       # [knu_retarget] Absolute Joint Position (7), no gripper -- all dims normalized
+     # fmt: on
+ 
+ 
+@@ -670,4 +671,12 @@ OXE_DATASET_CONFIGS = {
+         "state_encoding": StateEncoding.POS_EULER,
+         "action_encoding": ActionEncoding.EEF_POS,
+     },
++    ### [knu_retarget] KNU CDP1 -- human video retargeted to KUKA iiwa14 (no gripper), algorithm C (EAIK)
++    "knu_retarget": {
++        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": None},
++        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
++        "state_obs_keys": ["joint_state"],
++        "state_encoding": StateEncoding.JOINT,
++        "action_encoding": ActionEncoding.JOINT_POS_ABS,
++    },
+ }
+diff --git a/prismatic/vla/datasets/rlds/oxe/materialize.py b/prismatic/vla/datasets/rlds/oxe/materialize.py
+index 56d0d38..bd2d737 100644
+--- a/prismatic/vla/datasets/rlds/oxe/materialize.py
++++ b/prismatic/vla/datasets/rlds/oxe/materialize.py
+@@ -29,8 +29,8 @@ def make_oxe_dataset_kwargs(
+ ) -> Dict[str, Any]:
+     """Generates config (kwargs) for given dataset from Open-X Embodiment."""
+     dataset_kwargs = deepcopy(OXE_DATASET_CONFIGS[dataset_name])
+-    if dataset_kwargs["action_encoding"] not in [ActionEncoding.EEF_POS, ActionEncoding.EEF_R6]:
+-        raise ValueError(f"Cannot load `{dataset_name}`; only EEF_POS & EEF_R6 actions supported!")
++    if dataset_kwargs["action_encoding"] not in [ActionEncoding.EEF_POS, ActionEncoding.EEF_R6, ActionEncoding.JOINT_POS_ABS]:
++        raise ValueError(f"Cannot load `{dataset_name}`; only EEF_POS, EEF_R6 & JOINT_POS_ABS actions supported!")
+ 
+     # [Contract] For EEF_POS & EEF_R6 actions, only the last action dimension (gripper) is absolute!
+     # Normalize all action dimensions *except* the gripper
+@@ -40,6 +40,10 @@ def make_oxe_dataset_kwargs(
+     elif dataset_kwargs["action_encoding"] is ActionEncoding.EEF_R6:
+         dataset_kwargs["absolute_action_mask"] = [False] * 9 + [True]
+         dataset_kwargs["action_normalization_mask"] = [True] * 9 + [False]
++    elif dataset_kwargs["action_encoding"] is ActionEncoding.JOINT_POS_ABS:
++        # [knu_retarget] 7 absolute joint angles, no gripper -> normalize every dimension
++        dataset_kwargs["absolute_action_mask"] = [True] * 7
++        dataset_kwargs["action_normalization_mask"] = [True] * 7
+     dataset_kwargs["action_proprio_normalization_type"] = action_proprio_normalization_type
+ 
+     # Adjust Loaded Camera Views
+diff --git a/prismatic/vla/datasets/rlds/oxe/transforms.py b/prismatic/vla/datasets/rlds/oxe/transforms.py
+index cc9c687..caef31e 100644
+--- a/prismatic/vla/datasets/rlds/oxe/transforms.py
++++ b/prismatic/vla/datasets/rlds/oxe/transforms.py
+@@ -842,6 +842,12 @@ def libero_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+ 
+ 
+ # === Registry ===
++def knu_retarget_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
++    # [knu_retarget] action = next-step absolute joint angles (7, rad); state = current joint angles (7)
++    trajectory["observation"]["joint_state"] = trajectory["observation"]["state"][:, :7]
++    return trajectory
++
++
+ OXE_STANDARDIZATION_TRANSFORMS = {
+     "bridge_oxe": bridge_oxe_dataset_transform,
+     "bridge_orig": bridge_orig_dataset_transform,
+@@ -919,4 +925,6 @@ OXE_STANDARDIZATION_TRANSFORMS = {
+     "libero_object_no_noops": libero_dataset_transform,
+     "libero_goal_no_noops": libero_dataset_transform,
+     "libero_10_no_noops": libero_dataset_transform,
++    ### [knu_retarget]
++    "knu_retarget": knu_retarget_dataset_transform,
+ }
