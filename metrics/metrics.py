@@ -30,8 +30,8 @@ LIMITS_CSV = REPO / "robot" / "joint_limits.csv"
 TABLE_OUTLINE = REPO / "metrics" / "table_outline.json"
 URDF = REPO / "robot" / "robot.urdf"
 EPS_LIMIT = 1e-6                 # 한계 초과로 보지 않는 수치 오차 (rad)
-SUCCESS_POS_M = 0.01             # 2.1 성공: 위치 오차 1 cm 이하
-SUCCESS_ROT_RAD = np.deg2rad(5)  # 2.1 성공: 방향 오차 5° 이하
+SUCCESS_POS_M = 0.005            # 2.1 성공: 위치 오차 0.5 cm 이하 (v1.1, 11/6 팀 결정)
+SUCCESS_ROT_RAD = np.deg2rad(1)  # 2.1 성공: 방향 오차 1° 이하 (v1.1)
 BUDGET_MS = 1000.0 / 30.0        # 2.3 실시간 기준: 30 Hz 한 프레임 = 33.3 ms
 PROX_RAD = np.deg2rad(1.0)       # 2.11 한계 근접으로 보는 거리 δ = 1°
 RESAMPLE_HZ = 30.0               # 2.4·2.5 저크·속도는 이 주기로 맞춰 계산
@@ -100,7 +100,7 @@ def tracking_errors(tcp_pos, tcp_quat, target_pos, target_quat):
 
 
 def retarget_fail_rate(pos_err, rot_err, ok_limits):
-    """2.1 성공 = 위치 ≤ 1 cm, 방향 ≤ 5°, 관절 한계 안. 실패율 = 1 − 성공 프레임 비율.
+    """2.1 성공 = 위치 ≤ 0.5 cm, 방향 ≤ 1°, 관절 한계 안. 실패율 = 1 − 성공 프레임 비율.
 
     목표가 NaN인 프레임(손목 미검출)은 판정할 수 없어 분모에서 뺀다. 반환 (실패율, 목표 없는 프레임 비율).
     """
