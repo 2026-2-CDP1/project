@@ -164,7 +164,7 @@ def cmd_apply(a):
                "exo_end_frame": meta["exo_end_frame"], "segments": [], "grasp_frame": g}
         json.dump(lab, open(ep / "labels.json", "w"), ensure_ascii=False, indent=2)
         made += 1
-        errs = [x for x in check(lab, meta) if "grasp_frame 없음" not in x]
+        errs = check(lab, meta)
         if errs:
             bad.append((ep.name, errs))
     print(f"labels.json {made}개. grasp_frame 없음 {len(none)}: {none[:20]}\n구간 밖 {len(outside)}: {outside[:20]}\n검사 오류 {bad[:10]}")

@@ -56,9 +56,9 @@ def check(lab, meta=None):
         if b["start"] != a["end"] + 1:
             errs.append(f"{a['name']}.end({a['end']}) + 1 != {b['name']}.start({b['start']})")
     g = lab.get("grasp_frame")
-    if g is None:
-        errs.append("grasp_frame 없음")
-    elif start is not None and not (start <= g < end):
+    if g is None:  # 쥔 순간이 구간 밖이면 비워 둔다 (T2). 5-2번 지표는 파지점 거리만 뺀다
+        return errs
+    if start is not None and not (start <= g < end):
         errs.append(f"grasp_frame {g} 가 에피소드 구간 밖")
     else:
         gs = [s for s in segs if s["name"] == "grasp"]

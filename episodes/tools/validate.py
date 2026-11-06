@@ -54,7 +54,7 @@ def check_episode(d: Path):
 
 def main(root):
     eps = sorted(p for p in Path(root).iterdir() if p.is_dir() and (p.name[:1] == "T"))
-    tags, rows, fail = Counter(), [], 0
+    tags, rows, fail, no_grasp = Counter(), [], 0, Counter()
     for d in eps:
         errs, info = check_episode(d)
         if errs:
@@ -62,9 +62,12 @@ def main(root):
         if info:
             meta, kp, raw, pd_ = info
             tags.update((meta["task"], c) for c in meta["case_tags"])
+            if json.load(open(d / "labels.json")).get("grasp_frame") is None:
+                no_grasp[meta["task"]] += 1
             q = json.load(open(d / "quality.json")) if (d / "quality.json").exists() else {}
             rows.append((d.name, np.isnan(raw).any(axis=2).mean(), np.mean(q.get("spike_ratio", [np.nan])), np.isnan(pd_).mean()))
     print(f"\n에피소드 {len(eps)}개, 형식 오류 {fail}개")
+    print(f"grasp_frame 없음 (오류 아님, 파지점 거리만 제외): {sum(no_grasp.values())}개 {dict(no_grasp)}")
     if rows:
         print(f"\n{'ID':<12}{'누락률':>8}{'튐률':>8}{'pinch누락':>10}")
         for r in rows: print(f"{r[0]:<12}{r[1]:>8.3f}{r[2]:>8.3f}{r[3]:>10.3f}")
