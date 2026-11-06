@@ -1,6 +1,6 @@
 {
   "_note": "4번 리타게팅 설정. 결과를 보기 전에 고정 (공통 규칙). run_all.py 는 이 파일만 읽어 A·B·C에 같은 설정을 쓴다 (각 스크립트 기본값과도 같음). 바꾸면 이유를 README 변경 기록에 적고 A·B·C 모든 에피소드를 다시 실행",
-  "version": "1.2 고정 (2026-11-06)",
+  "version": "1.3 고정 (2026-11-07)",
   "common": {
     "scale": "arm_global",
     "_scale_note": "k = 0.82 m / 사람 팔 길이(위팔+아래팔). 사람 팔 길이 = 모든 에피소드(제외 목록 빼고) 에피소드별 중앙값의 중앙값 하나. human_arm_m 에 숫자를 넣으면 그 값으로 고정. 1.0 은 에피소드별(arm)",
@@ -17,8 +17,8 @@
             "_limits_note": "본 결과 clip (사전 정의). clamp 는 한계 처리 방식 비교용 (README 비교 실행)"},
   "B_mink": {"script": "mink_ik.py", "solver": "daqp", "w_elbow": 0.0, "posture": 1e-6, "damping": 1e-8,
              "lm_damping": 1.0, "max_iter": 100, "tol_pos": 1e-4, "tol_rot": 1e-3, "tol_step": 1e-5, "sat_eps": 1e-3},
-  "C_eaik": {"script": "eaik_ik.py", "select": "human", "lock_joint": 3, "grid_deg": 1.0, "refine_deg": 0.1,
-             "sat_eps": 1e-3, "_select_note": "human = 3번 관절 격자 탐색(지금). sew = 사람 SEW 각 고정(멘토 11/6 제안) 비교 후 확정 (README)"},
+  "C_eaik": {"script": "eaik_ik.py", "select": "sew", "lock_joint": 3, "grid_deg": 1.0, "refine_deg": 0.1,
+             "sat_eps": 1e-3, "_select_note": "sew = 사람 SEW 각으로 팔꿈치 고정 → 해석해 → 직전 프레임과 가장 가까운 해 (멘토 11/6 제안, 11/7 팀 확정). human = 3번 관절 격자 탐색 (v1.2, 비교용)"},
   "timing": {
     "node": "실행할 때 sbatch -w 로 고정. 실제 노드는 run_all.py 가 <out>/run_info_<작업번호>.json 에 기록",
     "slurm": "sbatch -p p02 -w <노드> -n 1 -c 1 --mem=4G",

@@ -282,7 +282,7 @@ def main():
     ap.add_argument("--base-z", type=float, default=0.0)
     ap.add_argument("--pos-only", default="hold", choices=common.POS_ONLY_MODES,
                     help="손목 위치만 있고 방향이 없는 프레임: hold=직전 방향 유지 / skip=목표 없음")
-    ap.add_argument("--select", default="human", choices=SELECTS, help="해 고르는 기준")
+    ap.add_argument("--select", default="sew", choices=SELECTS, help="해 고르는 기준 (sew = v1.3 본 결과, human = 격자)")
     ap.add_argument("--brief", action="store_true", help="결과를 한 줄로만 출력")
     for k, v in DEFAULT.items():
         ap.add_argument(f"--{k.replace('_', '-')}", type=type(v), default=v)
