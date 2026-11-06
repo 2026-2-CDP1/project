@@ -99,6 +99,20 @@ python replay/scene.py --check --out ~/out/본인이름/scene_check     # 합성
 
 ---
 
+## 4번 결과와 정합 확인 (역할 가이드 5-1 4단계)
+
+4번 npz의 손목 오차(`tcp_error`·`rot_error`, pinocchio + `robot.urdf`)와, 같은 관절 각도를 `replay()`(MuJoCo + `robot.xml`)로 재생해 다시 계산한 오차를 프레임마다 비교한다. 두 FK가 같으면 차이가 1e-6 이하여야 한다.
+
+```bash
+python replay/consistency.py --retarget <4번 결과 폴더> --out ~/out/신서연/consistency --limit 5   # 처음엔 알고리즘마다 5개
+```
+
+- 출력: `consistency.md`(알고리즘별 통과 수·차이 최대), `consistency.csv`(파일마다). 하나라도 실패하면 종료 코드 1
+- 실패하면 관절 순서, 모델 파일, TCP 위치(플랜지)부터 의심한다
+- 확인 (2026-11-06, 노트북 합성): 오차를 맞게 저장한 npz는 차이 0 → 통과, 6·7번 관절 순서를 바꾼 npz는 12.5 mm → 실패로 잡음
+
+---
+
 ## 나란히 보기 영상 (v1.4)
 
 사람 exo_front 영상 | 알고리즘별 로봇 재생을 가로로 붙인 mp4 (역할 가이드 5-1 5단계). worst 에피소드 확인(지표 정의서 5절)과 파지 프레임 확인(2.11)에 쓴다.
