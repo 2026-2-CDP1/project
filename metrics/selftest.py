@@ -99,13 +99,13 @@ def main(out_dir):
     check("성공률: 완벽히 따라감", "목표 = 재생한 TCP → 실패율 0", m["retarget_fail_rate"], 0.0)
     res = res_of(q_home)
     res["target_pos"][:20] += [0.02, 0, 0]                                   # 20프레임 2 cm 벗어남
-    res["target_pos"][20:30] += [0.005, 0, 0]                                # 10프레임 5 mm (성공)
+    res["target_pos"][20:30] += [0.003, 0, 0]                                # 10프레임 3 mm (성공)
     for t in range(30, 40):                                                  # 10프레임 방향 10° 벗어남
         res["target_quat"][t] = quat_mul(res["target_quat"][t], quat_z(10))
-    for t in range(40, 50):                                                  # 10프레임 방향 3° (성공)
-        res["target_quat"][t] = quat_mul(res["target_quat"][t], quat_z(3))
+    for t in range(40, 50):                                                  # 10프레임 방향 0.5° (성공)
+        res["target_quat"][t] = quat_mul(res["target_quat"][t], quat_z(0.5))
     m, _ = run(res)
-    check("성공률: 위치·방향 기준", "2 cm 20프레임 + 10° 10프레임 실패, 5 mm·3°는 성공 → 실패율 0.3", m["retarget_fail_rate"], 0.3)
+    check("성공률: 위치·방향 기준", "2 cm 20프레임 + 10° 10프레임 실패, 3 mm·0.5°는 성공 (기준 0.5 cm·1°) → 실패율 0.3", m["retarget_fail_rate"], 0.3)
     check("위치 추종 오차 최대 (m)", "같은 궤적", m["track_pos_err_max_m"], 0.02, tol=1e-9)
     check("방향 추종 오차 최대 (rad)", "같은 궤적", m["track_rot_err_max_rad"], np.deg2rad(10), tol=1e-6)
     q = q_home.copy()
