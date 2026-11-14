@@ -102,6 +102,7 @@
 | `v1_2/` | 본 실행: summary_<알고리즘>.csv, run_info_<작업>.json, success_by_episode·success_table·feasible_by_episode·where_by_episode.csv |
 | `v1_2_Aclamp/` | A clamp (B·C 열은 본 실행과 같음) |
 | `v1_2_Csew/` | C SEW 고정 (A·B 열은 본 실행과 같음) |
+| `v1_3_Ccont/` | C continuity, 사람 팔꿈치 없이 (8절, A·B 열은 본 실행과 같음) |
 
 ```bash
 O=~/out/hyojeong/retarget/v1_2    # 서버, source ~/use_robot.sh 후, ~/project 에서
@@ -126,3 +127,14 @@ python retarget/compare_runs.py --root ~/out/hyojeong/retarget --ref v1_2     # 
 
 - 서버 공식 폴더 `~/out/hyojeong/retarget/v1_3` = `A_DLS`·`B_mink` → `v1_2`, `C_eaik` → `v1_2_Csew` (연결). 5-2 `metrics.py`, 6·7번 RLDS 변환은 이 폴더를 쓰면 됨. 분석 csv는 `results/v1_2_Csew/`와 같음.
 - 남은 것: C 시간 95% 260 ms. 사람 SEW가 한계 밖이라 가장 가까운 각을 찾는 탐색 때문이며 C의 특성으로 보고. 속도 개선(직전 프레임 각부터 찾기)은 결과가 바뀔 수 있어 보류.
+
+## 8. 비교 실행: C 사람 팔꿈치 없이 (continuity) — 결과 대기
+
+지적: v1.3은 C만 사람 SEW 각을 입력으로 받아 A·B(손목만)와 공평한 비교가 아님. 남는 1자유도는 세 알고리즘 모두 어떤 기준으로든 정함 (A·B: 직전 해에서 출발·감쇠로 암묵적, C: 명시적) → C도 사람 팔꿈치 없이 돌려 본다.
+
+설정 v1.3에서 C `select`만 `continuity`로 바꿈 (`~/out/hyojeong/retarget/cfg/v1_3_Ccont.json`). continuity = 3번 관절 1° 격자로 해를 전부 구하고 직전 프레임 자세와 가장 가까운 해 → 0.1°로 다듬기. 서버 `~/out/hyojeong/retarget/v1_3_Ccont`, 노드 DIS02 (2026-11-14 실행).
+
+- 같은 입력 비교: A · B · **C 연속**
+- 사람 SEW 입력 효과: **C 연속** 대 C SEW (공식) · C 격자
+
+(표는 실행이 끝나면 `compare_runs.py`로 채움)
