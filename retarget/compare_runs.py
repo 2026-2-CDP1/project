@@ -13,6 +13,10 @@
   python retarget/compare_runs.py --root ~/out/hyojeong/retarget --ref v1_2 \\
       --run "A clip=v1_2/A_DLS" --run "A clamp=v1_2_Aclamp/A_DLS" --run "B=v1_2/B_mink" \\
       --run "C 격자=v1_2/C_eaik" --run "C SEW=v1_2_Csew/C_eaik"
+  사람 팔꿈치 없이 같은 입력 비교 (A·B 손목만 + C continuity):
+  python retarget/compare_runs.py --root ~/out/hyojeong/retarget --ref v1_2 \\
+      --run "A=v1_2/A_DLS" --run "B=v1_2/B_mink" \\
+      --run "C 연속=v1_3_Ccont/C_eaik" --run "C 격자=v1_2/C_eaik" --run "C SEW=v1_2_Csew/C_eaik"
 """
 import argparse
 import csv
