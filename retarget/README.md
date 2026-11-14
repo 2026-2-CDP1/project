@@ -64,7 +64,7 @@ sbatch -p p02 -w DIS01 -n 1 -c 1 --mem=4G --job-name retarget_본인이름 -o $O
 - 실패는 멈추지 않고 `summary.csv`에 이유와 함께 기록. 기본 제외 `T2_E008`(싱크 문제, `--exclude`).
 - 알고리즘별로 나눠 동시에 돌리려면 같은 `-w` 노드로 sbatch 세 번, 각각 `--algos A_DLS` / `B_mink` / `C_eaik`. 이때 요약은 `summary_A_DLS.csv`처럼 알고리즘마다 따로 저장된다 (동시에 한 파일에 쓰지 않게).
 - 시험: `--limit 3` 또는 `--ids "T1_E00*"`.
-- **비교 실행 (v1.2)**: 설정 파일을 복사해 한 항목만 바꾸고 `--config`로 넘긴다. A 한계 처리 비교 `"A_DLS": {"limits": "clamp"}` → `--algos A_DLS`, C 풀이 방식 비교 `"C_eaik": {"select": "sew"}` → `--algos C_eaik` (느려서 `--ids "T1_*"` 등으로 나눠 작업 여러 개). sbatch 안에서는 `. ~/use_robot.sh`의 `conda activate`가 CondaError를 내지만, `source ~/use_robot.sh` 한 창에서 제출하면 환경이 넘어간다. 바꾼 설정 파일은 `/tmp`가 아니라 `~/out/본인이름/` 아래에 둔다 (계산 노드에서 `/tmp`가 안 보임).
+- **비교 실행 (v1.2)**: 설정 파일을 복사해 한 항목만 바꾸고 `--config`로 넘긴다. A 한계 처리 비교 `"A_DLS": {"limits": "clamp"}` → `--algos A_DLS`, C 풀이 방식 비교 `"C_eaik": {"select": "sew"}` → `--algos C_eaik` (느려서 `--ids "T1_*"` 등으로 나눠 작업 여러 개). C 사람 팔꿈치 없이(A·B와 같은 입력) `"C_eaik": {"select": "continuity"}` → `--algos C_eaik`, 결과 `v1_3_Ccont` (격자라 224개 약 25분, 작업 하나로). sbatch 안에서는 `. ~/use_robot.sh`의 `conda activate`가 CondaError를 내지만, `source ~/use_robot.sh` 한 창에서 제출하면 환경이 넘어간다. 바꾼 설정 파일은 `/tmp`가 아니라 `~/out/본인이름/` 아래에 둔다 (계산 노드에서 `/tmp`가 안 보임).
 - 출력: `$OUT/<알고리즘>/<ID>.npz`, `$OUT/summary.csv` (에피소드 × 알고리즘 한 줄: 손목 오차 95%·최대·1 cm 넘은 프레임 수, 팔 회전각, 시간, 빈 값 처리 수, 재시작 수), `$OUT/run_info_<작업번호>.json` (노드·설정·축척·패키지 버전·git 커밋).
 - `$OUT`은 5-2 `metrics.py run --retarget $OUT`으로 그대로 읽는다.
 
