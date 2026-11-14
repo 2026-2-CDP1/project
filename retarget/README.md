@@ -31,6 +31,7 @@
 | `check_where.py` | 구간 처음 0.5초 / 가운데 / 마지막 0.5초별 할 수 없는 목표(안 닿음·너무 가까움)와 A·B·C 실패율, 태스크별 + T2 빠름 → `where_by_episode.csv` |
 | `check_speed.py` | 관절 궤적을 영상 속도로 재생할 때 iiwa 관절 속도 한계(`robot.urdf`)를 넘는 프레임 비율 (참고, 공식은 5-2) |
 | `compare_runs.py` | 설정 한 항목만 바꾼 실행들을 한 표로 비교 (성공률, 팔 회전각 차이, 관절 한계에 붙은 비율, 튐, 시간) |
+| `compare_elbow.py` | 사람 팔꿈치 입력 유무 비교 (A·B·C 팔꿈치 없이 / 써서, 할 수 있는 목표 기준 손목 성공·팔 회전각 30° 안·한계·튐·시간, 태스크별) |
 | `results_v1_2.md`, `results/v1_2*/` | **현재 공식 결과**: 설정 v1.2 × `episodes_v4`, 비교 실행 A clamp·C SEW 포함·C continuity(`results/v1_3_Ccont/`) (npz는 서버 `~/out/hyojeong/retarget/v1_2*`) |
 | `results_v4.md`, `results/v4/` | 설정 v1.1 × `episodes_v4` (비교용, 팔꿈치 입력·1 cm·5°) |
 | `results_v1.md`, `results/v1/` | 이전 데이터 `episodes_v1` 결과 (비교용, npz는 서버 `~/out/hyojeong/retarget/v1`) |
