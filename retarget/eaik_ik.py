@@ -65,7 +65,8 @@ REFINE_MAX = np.radians(20.0)  # smooth: 스무딩한 3번 값으로 다시 푼 
 DEFAULT = {"grid_deg": 1.0, "refine_deg": 0.1, "sat_eps": 1e-3,
            # smooth 전용 (다른 select 에서는 안 씀)
            "dp_grid_deg": 5.0,     # 후보용 3번 관절 격자
-           "w_swivel": 8.0,        # 팔 회전각 차이 (rad²) 가중치. 20° 차이 ≈ 한 관절이 속도 한계로 움직이는 한 프레임 비용
+           "w_swivel": 2000.0,     # 팔 회전각 차이 (rad²) 가중치. 8 이면 속도 비용에 묻혀 팔이 사람과 반대(~160°)로 감.
+                                   # 11/25 T1_E067·T2_E015 시험: 300/2000/10000/50000 중 2000 이 저크·팔 회전각 균형 (50000 은 다시 튐)
            "w_limit": 1.0,         # 관절 한계 근접 벌점 가중치
            "w_over": 100.0,        # 속도 한계 초과 벌점 가중치
            "smooth_sigma": 2.0}    # 3번 관절 스무딩 (프레임). 0 이면 안 함
@@ -462,7 +463,7 @@ def main():
     scale = a.scale if a.scale == "arm" else float(a.scale)
     targets = common.make_targets(ep, scale=scale, r_off=a.r_off, anchor=a.anchor, mount=a.mount, base_z=a.base_z,
                                   pos_only=a.pos_only)
-    solver = EaikIK(Path(a.urdf).expanduser(), a.select, a.grid_deg, a.refine_deg, a.sat_eps)
+    solver = EaikIK(Path(a.urdf).expanduser(), a.select, **{k: getattr(a, k) for k in DEFAULT})
 
     t0 = time.time()
     q, sat, status, pos_err, rot_err, swv_err, n_cand, q3_pick, time_ms, elbow_used = run_episode(solver, targets)
