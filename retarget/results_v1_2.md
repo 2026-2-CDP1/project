@@ -103,6 +103,7 @@
 | `v1_2_Aclamp/` | A clamp (B·C 열은 본 실행과 같음) |
 | `v1_2_Csew/` | C SEW 고정 (A·B 열은 본 실행과 같음) |
 | `v1_3_Ccont/` | C continuity, 사람 팔꿈치 없이 (8절, A·B 열은 본 실행과 같음) |
+| `v1_3_Csmooth/` | C smooth, 에피소드 전체 DP + 3번 관절 스무딩 (9절, A·B 열은 본 실행과 같음) |
 | `v4/` (기존) | 설정 v1.1, A·B·C 모두 사람 팔꿈치 입력 (8-1절 팔꿈치 있음 A·B, [`results_v4.md`](results_v4.md)) |
 
 ```bash
