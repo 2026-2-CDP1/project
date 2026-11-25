@@ -83,6 +83,8 @@ def solve(algo, mod, solver, targets, cfg):
         extra = dict(rot_error=re, swivel_error=swv, n_candidates=n_cand, q3_pick=q3, time_ms=time_ms, elbow_used=used)
         if cfg["C_eaik"].get("select") == "sew" and hasattr(solver, "episode_sew_delta"):   # SEW 고정: 사람 각에서 벗어난 각
             extra.update(sew_delta=solver.episode_sew_delta)
+        if cfg["C_eaik"].get("select") == "smooth":   # DP 로도 못 피한 갈래 바뀜 (속도 한계 초과 프레임)
+            extra.update(branch_switch=solver.episode_branch_switch)
     else:
         q, sat, status, pe, re, swv, iters, time_ms, used, restarted = mod.run_episode(
             solver, targets, restart_tol=cfg[algo].get("restart_tol", 0.0))
